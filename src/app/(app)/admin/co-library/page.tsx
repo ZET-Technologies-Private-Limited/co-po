@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useUIStore } from "@/lib/uiStore";
 
 // ─── MOCK CO LIBRARY (Spec-aligned) ──────────────────────────────────────
 const MOCK_LIBRARY = [
@@ -51,6 +52,7 @@ const MOCK_LIBRARY = [
 export default function AdminCOLibraryPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("Active");
+  const { addToast } = useUIStore();
 
   const filteredLibrary = MOCK_LIBRARY.filter(course => 
     course.status === activeTab &&
@@ -72,10 +74,14 @@ export default function AdminCOLibraryPage() {
             <p className="text-white/40 font-light mt-2">Master Library for University-wide Default Outcomes</p>
           </div>
           <div className="flex gap-4">
-             <button className="px-6 py-3 border border-white/10 text-white hover:bg-white/5 text-[10px] font-mono uppercase tracking-widest transition-all flex items-center gap-2">
+             <button 
+               onClick={() => addToast("Bulk import initiated. Waiting for file...", "info")}
+               className="px-6 py-3 border border-white/10 text-white hover:bg-white/5 text-[10px] font-mono uppercase tracking-widest transition-all flex items-center gap-2">
                <Upload className="w-3.5 h-3.5" /> Bulk Import
              </button>
-             <button className="px-8 py-3 bg-brand text-white font-mono text-[10px] uppercase tracking-widest hover:bg-brand/90 transition-all flex items-center gap-2">
+             <button 
+               onClick={() => addToast("Prepared environment for new CO Set Registration", "info")}
+               className="px-8 py-3 bg-brand text-white font-mono text-[10px] uppercase tracking-widest hover:bg-brand/90 transition-all flex items-center gap-2">
                <Plus className="w-4 h-4" /> Register New Set
              </button>
           </div>
@@ -137,15 +143,21 @@ export default function AdminCOLibraryPage() {
                    </p>
                  </div>
                  <div className="flex gap-3">
-                    <button className="px-4 py-2 border border-white/10 text-[10px] font-mono uppercase tracking-widest text-white/60 hover:text-white hover:border-white/30 transition-all flex items-center gap-2">
+                    <button 
+                      onClick={() => addToast(`Editing definitions for ${course.courseCode}`, "info")}
+                      className="px-4 py-2 border border-white/10 text-[10px] font-mono uppercase tracking-widest text-white/60 hover:text-white hover:border-white/30 transition-all flex items-center gap-2">
                       <Edit3 className="w-3.5 h-3.5" /> Edit Set
                     </button>
                     {course.status === 'Active' ? (
-                      <button className="px-4 py-2 border border-alert/30 bg-alert/5 text-[10px] font-mono uppercase tracking-widest text-alert hover:bg-alert hover:text-white transition-all flex items-center gap-2">
+                      <button 
+                        onClick={() => addToast(`${course.courseCode} locked and moved to archive.`, "success")}
+                        className="px-4 py-2 border border-alert/30 bg-alert/5 text-[10px] font-mono uppercase tracking-widest text-alert hover:bg-alert hover:text-white transition-all flex items-center gap-2">
                         <Archive className="w-3.5 h-3.5" /> Archive
                       </button>
                     ) : (
-                      <button className="px-4 py-2 border border-attain/30 bg-attain/5 text-[10px] font-mono uppercase tracking-widest text-attain hover:bg-attain hover:text-white transition-all flex items-center gap-2">
+                      <button 
+                        onClick={() => addToast(`${course.courseCode} restored to active library.`, "success")}
+                        className="px-4 py-2 border border-attain/30 bg-attain/5 text-[10px] font-mono uppercase tracking-widest text-attain hover:bg-attain hover:text-white transition-all flex items-center gap-2">
                         <CheckCircle2 className="w-3.5 h-3.5" /> Restore
                       </button>
                     )}
@@ -172,7 +184,9 @@ export default function AdminCOLibraryPage() {
                  
                  {/* Only allow appending on active sets */}
                  {course.status === 'Active' && (
-                   <button className="p-6 border border-dashed border-white/10 hover:border-brand/40 flex flex-col items-center justify-center gap-2 text-white/10 hover:text-brand transition-all">
+                   <button 
+                     onClick={() => addToast(`Opened editor to append new outcome to ${course.courseCode}`, "info")}
+                     className="p-6 border border-dashed border-white/10 hover:border-brand/40 flex flex-col items-center justify-center gap-2 text-white/10 hover:text-brand transition-all">
                       <Plus className="w-5 h-5" />
                       <span className="text-[9px] font-mono uppercase tracking-widest">Append Outcome</span>
                    </button>

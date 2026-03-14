@@ -4,9 +4,11 @@ import { motion } from "framer-motion";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
 import { Calendar, Save, CheckCircle2, Clock, ShieldAlert, ArrowRight, Copy } from "lucide-react";
 import { useState } from "react";
+import { useUIStore } from "@/lib/uiStore";
 
 export default function AcademicYearConfigPage() {
   const [activeTab, setActiveTab] = useState("current");
+  const { addToast } = useUIStore();
 
   return (
     <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-6xl mx-auto pb-32">
@@ -21,7 +23,9 @@ export default function AcademicYearConfigPage() {
           <p className="text-white/40 font-light italic">Configure global timelines, deadlines, and regulation alignment.</p>
         </div>
         <div className="flex gap-4">
-           <button className="px-6 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
+           <button 
+             onClick={() => addToast("Academic Year configuration saved successfully", "success")}
+             className="px-6 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
              <Save className="w-3.5 h-3.5" /> Save Configuration
            </button>
         </div>
@@ -91,7 +95,9 @@ export default function AcademicYearConfigPage() {
                <div>
                   <h3 className="text-lg font-display text-white mb-2">Import Previous Definitions</h3>
                   <p className="text-white/40 font-light text-sm mb-6">Clone Course-Faculty assignments, CO-PO mappings, and Department alignments from a locked Academic Year to accelerate initialization.</p>
-                  <button className="px-6 py-2.5 border border-white/20 text-white hover:bg-white/5 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
+                  <button 
+                    onClick={() => addToast("Cloned settings from 2023-24 successfully", "success")}
+                    className="px-6 py-2.5 border border-white/20 text-white hover:bg-white/5 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
                     Clone from 2023-24 <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                </div>
@@ -108,7 +114,9 @@ export default function AcademicYearConfigPage() {
                  Initiating a Year-End Lock will instantly freeze all academic operations, marks entries, and calculations for 2024-25. 
                  This action requires full HOD digital sign-off across all departments and is irreversable via the standard UI.
                </p>
-               <button className="w-full py-3 bg-alert/20 text-alert border border-alert/50 text-[10px] font-mono uppercase tracking-widest rounded hover:bg-alert hover:text-white transition-colors text-center">
+               <button 
+                 onClick={() => addToast("Year-End Lock initiated. Awaiting HOD sign-offs.", "warning")}
+                 className="w-full py-3 bg-alert/20 text-alert border border-alert/50 text-[10px] font-mono uppercase tracking-widest rounded hover:bg-alert hover:text-white transition-colors text-center">
                  Initiate Lock Sequence
                </button>
             </div>

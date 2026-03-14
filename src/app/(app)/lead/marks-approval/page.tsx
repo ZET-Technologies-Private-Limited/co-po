@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useUIStore } from "@/lib/uiStore";
 
 // ─── MOCK DATA ───────────────────────────────────────────────────────────
 const PENDING_SUBMISSIONS = [
@@ -21,6 +22,7 @@ export default function LeadMarksApprovalPage() {
   const [comment, setComment] = useState("");
   const [isApproving, setIsApproving] = useState(false);
   const [isReturning, setIsReturning] = useState(false);
+  const { addToast } = useUIStore();
 
   const handleAction = (type: 'approve' | 'return') => {
     if (type === 'approve') setIsApproving(true);
@@ -31,6 +33,10 @@ export default function LeadMarksApprovalPage() {
       setIsApproving(false);
       setIsReturning(false);
       setComment("");
+      addToast(
+        type === 'approve' ? "Marks approved and locked" : "Marks returned to faculty for revision", 
+        type === 'approve' ? 'success' : 'warning'
+      );
     }, 1500);
   };
 

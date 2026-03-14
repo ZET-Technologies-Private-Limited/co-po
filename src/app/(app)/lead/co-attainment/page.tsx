@@ -153,9 +153,9 @@ export default function LeadCOAttainmentPage() {
                      <div className="flex flex-col gap-2">
                         <label className="text-[10px] text-white/30 uppercase tracking-widest">New Attainment Level</label>
                         <select value={overrideLevel} onChange={e => setOverrideLevel(e.target.value)} className="bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors">
-                           <option value="L3" className="bg-cosmic text-attain">Level 3 (>=60%)</option>
+                           <option value="L3" className="bg-cosmic text-attain">Level 3 (&gt;=60%)</option>
                            <option value="L2" className="bg-cosmic text-amber-500">Level 2 (40-59%)</option>
-                           <option value="L1" className="bg-cosmic text-alert">Level 1 (<40%)</option>
+                           <option value="L1" className="bg-cosmic text-alert">Level 1 (&lt;40%)</option>
                         </select>
                      </div>
                      <div className="flex flex-col gap-2">

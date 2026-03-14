@@ -7,10 +7,12 @@ import {
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
 import { useAuthStore } from "@/lib/authStore";
 import { useRouter } from "next/navigation";
+import { useUIStore } from "@/lib/uiStore";
 
 export default function ProfilePage() {
   const { user, activeRole, logout } = useAuthStore();
   const router = useRouter();
+  const { addToast } = useUIStore();
 
   const handleLogout = () => {
     logout();
@@ -87,10 +89,14 @@ export default function ProfilePage() {
                </div>
                <div className="flex flex-col gap-4">
                   <span className="text-[10px] font-mono text-white/30 uppercase tracking-widest">Security Controls</span>
-                  <button className="text-left w-full max-w-[200px] px-4 py-2 border border-white/10 text-white hover:border-white/30 transition-colors text-xs font-mono uppercase tracking-widest">
+                  <button 
+                    onClick={() => addToast("Password update link sent to institutional email", "info")}
+                    className="text-left w-full max-w-[200px] px-4 py-2 border border-white/10 text-white hover:border-white/30 transition-colors text-xs font-mono uppercase tracking-widest">
                      Update Password
                   </button>
-                  <button className="text-left w-full max-w-[200px] px-4 py-2 border border-white/10 text-white hover:border-white/30 transition-colors text-xs font-mono uppercase tracking-widest">
+                  <button 
+                    onClick={() => addToast("Redirecting to Multi-factor Authentication Setup", "info")}
+                    className="text-left w-full max-w-[200px] px-4 py-2 border border-white/10 text-white hover:border-white/30 transition-colors text-xs font-mono uppercase tracking-widest">
                      Configure 2FA
                   </button>
                </div>

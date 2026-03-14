@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { staggerContainer, fadeSlideUp } from "@/lib/animations";
 import { useAuthStore } from "@/lib/authStore";
+import { useUIStore } from "@/lib/uiStore";
 import { COURSE_COS, getAttainmentLevel, getCurricularGaps } from "@/lib/appData";
 
 // ─── MOCK DATA (spec-aligned) ────────────────────────────────────────────
@@ -49,6 +50,7 @@ const AY_OPTIONS = ["2024-25", "2023-24", "2022-23"];
 
 export function FacultyDashboardView() {
   const { user, activeAY, setActiveAY } = useAuthStore();
+  const { addToast } = useUIStore();
   const isPastAY = activeAY !== "2024-25";
 
   return (
@@ -75,7 +77,7 @@ export function FacultyDashboardView() {
             <span className="text-xs font-mono text-white/30 uppercase tracking-widest">AY</span>
             <div className="flex gap-2">
               {AY_OPTIONS.map(ay => (
-                <button key={ay} onClick={() => setActiveAY(ay)}
+                <button key={ay} onClick={() => { setActiveAY(ay); addToast(`Switched to Academic Year ${ay}`, 'info'); }}
                   className={`px-4 py-2 text-xs font-mono uppercase tracking-widest transition-all border ${
                     activeAY === ay ? "border-brand text-brand bg-brand/10" : "border-white/10 text-white/30 hover:text-white hover:border-white/30"
                   }`}>

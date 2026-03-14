@@ -6,6 +6,7 @@ import {
   Users, Search, UserPlus, FileUp, Edit3, Trash2, Shield, MoreVertical, XCircle, CheckCircle2 
 } from "lucide-react";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useUIStore } from "@/lib/uiStore";
 
 // ─── MOCK DATA ───
 const DEPARTMENTS = ["CSE", "ECE", "MECH", "CIVIL", "IT"];
@@ -26,6 +27,7 @@ export default function AdminUserManagementPage() {
   
   const [isAdding, setIsAdding] = useState(false);
   const [newUser, setNewUser] = useState({ id: "", name: "", email: "", dept: "CSE", role: "faculty" });
+  const { addToast } = useUIStore();
 
   const filteredUsers = USERS_MOCK.filter(u => 
     (deptFilter === "all" || u.dept === deptFilter) &&
@@ -43,7 +45,9 @@ export default function AdminUserManagementPage() {
           <p className="text-white/40 font-light italic">System-wide role-based access control and account lifecycle management</p>
         </div>
         <div className="flex gap-4">
-           <button className="px-6 py-2.5 bg-white/[0.05] border border-white/10 text-white hover:bg-white/10 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
+           <button 
+             onClick={() => addToast("Prepared system for CSV bulk import", "info")}
+             className="px-6 py-2.5 bg-white/[0.05] border border-white/10 text-white hover:bg-white/10 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
              <FileUp className="w-3.5 h-3.5" /> CSV Bulk Import
            </button>
            <button onClick={() => setIsAdding(true)} className="px-6 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded shadow-[0_0_15px_rgba(30,174,219,0.3)]">
@@ -138,7 +142,9 @@ export default function AdminUserManagementPage() {
                         </div>
                      </td>
                      <td className="px-6 py-6 text-right relative">
-                        <button className="p-2 text-white/20 hover:text-white transition-colors opacity-0 group-hover:opacity-100">
+                        <button 
+                          onClick={() => addToast(`Opened management options for ${user.id}`, "info")}
+                          className="p-2 text-white/20 hover:text-white transition-colors opacity-0 group-hover:opacity-100">
                            <MoreVertical className="w-4 h-4" />
                         </button>
                      </td>
@@ -192,7 +198,12 @@ export default function AdminUserManagementPage() {
 
                   <div className="mt-8 pt-6 border-t border-white/10 flex justify-end gap-4">
                      <button onClick={() => setIsAdding(false)} className="px-6 py-2 text-white/40 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">Cancel</button>
-                     <button onClick={() => setIsAdding(false)} className="px-8 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/80 transition-colors flex items-center gap-2 rounded">
+                     <button 
+                        onClick={() => {
+                           setIsAdding(false);
+                           addToast(`Provisioned new ${newUser.role.replace('_', ' ')} profile for ${newUser.name || newUser.id || 'User'}`, "success");
+                        }} 
+                        className="px-8 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/80 transition-colors flex items-center gap-2 rounded">
                         <CheckCircle2 className="w-4 h-4" /> Create Profile
                      </button>
                   </div>

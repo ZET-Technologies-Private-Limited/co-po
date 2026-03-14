@@ -7,6 +7,7 @@ import {
   Search, Flag, History, ChevronDown
 } from "lucide-react";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useUIStore } from "@/lib/uiStore";
 
 // ─── MOCK DATA ───
 const COURSES = [
@@ -35,6 +36,7 @@ export default function HODCOAttainmentPage() {
   const [selectedSem, setSelectedSem] = useState("all");
   const [search, setSearch] = useState("");
   const [showLog, setShowLog] = useState(false);
+  const { addToast } = useUIStore();
 
   const filteredData = CO_DATA.filter(d => {
     const semMatch = selectedSem === "all" || COURSES.find(c => c.id === d.course)?.sem === selectedSem;
@@ -55,7 +57,9 @@ export default function HODCOAttainmentPage() {
            <button onClick={() => setShowLog(!showLog)} className={`px-6 py-2.5 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 border ${showLog ? 'bg-white/10 text-white border-white/20' : 'bg-transparent text-white/50 border-white/10 hover:text-white'}`}>
              <History className="w-3.5 h-3.5" /> Override Log
            </button>
-           <button className="px-6 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
+           <button 
+             onClick={() => addToast("Generating Department-wide PO Attainment Report...", "info")}
+             className="px-6 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
              <Download className="w-3.5 h-3.5" /> Export Department Report
            </button>
         </div>
@@ -167,7 +171,9 @@ export default function HODCOAttainmentPage() {
                            ) : <span className="text-white/20">—</span>}
                        </td>
                        <td className="px-6 py-6 text-right">
-                          <button className={`p-2 rounded border transition-colors ${row.flagged ? 'bg-alert/20 border-alert text-alert' : 'bg-transparent border-white/10 text-white/20 hover:text-white hover:border-white/30'}`}>
+                          <button 
+                            onClick={() => addToast(`Flagged ${courseInfo?.name} ${row.co} for mandatory review by ${courseInfo?.lead}`, "warning")}
+                            className={`p-2 rounded border transition-colors ${row.flagged ? 'bg-alert/20 border-alert text-alert' : 'bg-transparent border-white/10 text-white/20 hover:text-white hover:border-white/30'}`}>
                              <Flag className="w-4 h-4" />
                           </button>
                        </td>

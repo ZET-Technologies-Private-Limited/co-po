@@ -100,7 +100,7 @@ export default function HODPOAttainmentPage() {
            </div>
            <div className="bg-white/[0.02] border border-white/10 p-6 rounded-xl flex items-center justify-between">
               <div>
-                 <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">Critical Gaps (< 10%)</p>
+                 <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">Critical Gaps (&lt; 10%)</p>
                  <p className="text-3xl font-display text-alert">1 <span className="text-lg text-white/20">PO4</span></p>
               </div>
            </div>

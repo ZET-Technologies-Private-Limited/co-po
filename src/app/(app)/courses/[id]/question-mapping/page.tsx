@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useUIStore } from "@/lib/uiStore";
 
 // ─── MOCK DATA ───────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -22,8 +23,10 @@ export default function AIQuestionMapperPage({ params }: { params: Promise<{ id:
   const { id } = use(params);
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<typeof QUESTIONS>([]);
+  const { addToast } = useUIStore();
 
   const handleBulkUpload = () => {
+    addToast("PDF received. Initiating NLP semantic extraction of questions...", "info");
     setAnalyzing(true);
     setTimeout(() => {
       setAnalyzing(false);

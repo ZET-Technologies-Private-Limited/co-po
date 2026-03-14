@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "@/lib/authStore";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useUIStore } from "@/lib/uiStore";
 
 // ─── MOCK CHECKLIST ──────────────────────────────────────────────────────
 const CHECKLIST = [
@@ -31,6 +32,7 @@ export default function HODYearEndLockPage() {
     setTimeout(() => {
       setIsLocking(false);
       setLocked(true);
+      addToast("AY 2024-25 records sealed and archived successfully.", "success");
     }, 2500);
   };
 

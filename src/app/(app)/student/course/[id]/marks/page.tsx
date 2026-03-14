@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useUIStore } from "@/lib/uiStore";
 
 // ─── MOCK DATA ───────────────────────────────────────────────────────────
 const MARKS_DETAIL = {
@@ -26,6 +27,7 @@ export default function StudentMarksDetailPage({ params }: { params: Promise<{ i
   const [showGrievance, setShowGrievance] = useState(false);
   const [grievanceText, setGrievanceText] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const { addToast } = useUIStore();
 
   const handleSubmitGrievance = () => {
     setSubmitted(true);
@@ -33,6 +35,7 @@ export default function StudentMarksDetailPage({ params }: { params: Promise<{ i
       setShowGrievance(false);
       setSubmitted(false);
       setGrievanceText("");
+      addToast("Grievance submitted successfully. The faculty will review your concern.", "success");
     }, 2000);
   };
 
