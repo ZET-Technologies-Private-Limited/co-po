@@ -167,130 +167,116 @@ export default function HODCOAttainmentPage() {
         </header>
 
         {/* ── FILTERS ── */}
-        <section className="grid grid-cols-5 gap-4 p-4 border border-white/10 bg-white/[0.02] rounded-2xl">
-          <div className="col-span-2 relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+        <section className="flex items-center gap-8 py-8 border-b border-white/5">
+          <div className="flex-1 relative">
+            <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
             <input
               type="text"
-              placeholder="Search by course code or name..."
-              className="w-full bg-white/5 border border-white/5 rounded-xl py-3 pl-12 pr-4 text-sm text-white outline-none focus:border-brand"
+              placeholder="Filter by course code or name..."
+              className="w-full bg-transparent py-3 pl-8 pr-4 text-sm text-white outline-none placeholder:text-white/10"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          {["All Semesters", "All Regulations", `AY ${activeAY}`].map(
-            (f, i) => (
-              <div key={i} className="relative group">
-                <select className="w-full bg-white/5 border border-white/5 rounded-xl py-3 px-4 text-xs text-white/60 appearance-none outline-none focus:border-brand cursor-default">
-                  <option>{f}</option>
-                </select>
-                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-3 h-3 text-white/20 pointer-events-none" />
-              </div>
-            )
-          )}
+          <div className="flex gap-12">
+            {["All Semesters", "All Regulations", `AY ${activeAY}`].map(
+              (f, i) => (
+                <div key={i} className="relative group min-w-[120px]">
+                  <select className="w-full bg-transparent text-[10px] font-mono text-white/40 uppercase tracking-widest appearance-none outline-none cursor-pointer hover:text-white transition-colors">
+                    <option>{f}</option>
+                  </select>
+                  <ChevronDown className="absolute -right-4 top-1/2 -translate-y-1/2 w-3 h-3 text-white/10 pointer-events-none" />
+                </div>
+              )
+            )}
+          </div>
         </section>
 
-        {/* ── MAIN TABLE ── */}
-        <section className="border border-white/10 bg-white/[0.01] rounded-3xl overflow-hidden">
+        {/* ── MAIN TABLE (FLATTENED) ── */}
+        <section className="mt-8">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-white/10 bg-white/[0.02]">
-                <th className="p-6 text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                  Course Detail
+              <tr className="border-b border-white/5">
+                <th className="py-4 text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">
+                  Course Identity
                 </th>
-                <th className="p-6 text-center text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                  CO Attainment (L1-L3)
+                <th className="py-4 text-center text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">
+                  Attainment Matrix
                 </th>
-                <th className="p-6 text-center text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                  Remedial
+                <th className="py-4 text-center text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">
+                  Remedial Status
                 </th>
-                <th className="p-6 text-right text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                  Actions
+                <th className="py-4 text-right text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">
+                  Audit
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-white/[0.02]">
               {filteredCourses.length === 0 ? (
                 <tr>
                   <td
                     colSpan={4}
-                    className="p-10 text-center text-sm text-white/30 italic"
+                    className="py-12 text-center text-xs text-white/10 italic font-mono"
                   >
-                    No courses with approved marks found for the selected
-                    department / filters.
+                    No approved attainment records match the current filter set.
                   </td>
                 </tr>
               ) : (
                 filteredCourses.map((c) => (
                   <tr
                     key={c.id}
-                    className="group hover:bg-white/[0.02] transition-colors"
+                    className="group hover:bg-white/[0.01] transition-colors"
                   >
-                    <td className="p-6">
-                      <p className="text-sm font-bold text-white uppercase">
+                    <td className="py-8">
+                      <p className="text-sm font-bold text-white tracking-tight">
                         {c.code}
                       </p>
-                      <p className="text-[11px] text-white/40 mt-1">
+                      <p className="text-[11px] text-white/30 mt-1 uppercase font-mono tracking-tighter">
                         {c.name}
                       </p>
-                      <div className="flex gap-2 mt-2">
-                        <span className="text-[8px] px-1.5 py-0.5 bg-white/5 rounded text-white/30 font-mono uppercase">
-                          Sem {c.sem}
+                      <div className="flex gap-4 mt-3">
+                        <span className="text-[9px] text-white/20 font-mono uppercase tracking-widest">
+                          S{c.sem}
                         </span>
-                        {c.regulation && (
-                          <span className="text-[8px] px-1.5 py-0.5 bg-white/5 rounded text-white/30 font-mono uppercase">
-                            {c.regulation}
-                          </span>
-                        )}
+                        <span className="text-[9px] text-white/20 font-mono uppercase tracking-widest">
+                          {c.regulation || "General"}
+                        </span>
                       </div>
                     </td>
-                    <td className="p-6 align-middle">
-                      <div className="flex justify-center gap-1.5">
+                    <td className="py-8">
+                      <div className="flex justify-center gap-2">
                         {CO_KEYS.map((_, idx) => {
                           const lvl = c.levels[idx];
-                          if (!lvl) {
-                            return (
-                              <div
-                                key={idx}
-                                className="w-8 h-8 rounded border border-dashed border-white/10 text-[10px] font-mono text-white/15 flex items-center justify-center"
-                              >
-                                —
-                              </div>
-                            );
-                          }
                           return (
                             <div
                               key={idx}
-                              className={`w-8 h-8 rounded flex items-center justify-center text-[10px] font-mono font-bold ${
-                                lvl === 3
-                                  ? "bg-attain/20 text-attain border border-attain/30"
-                                  : lvl === 2
-                                  ? "bg-amber-400/20 text-amber-400 border border-amber-400/30"
-                                  : "bg-alert/20 text-alert border border-alert/30"
+                              className={`w-9 h-9 border flex items-center justify-center text-[10px] font-mono transition-all ${
+                                lvl === 3 ? "text-attain border-attain/20 bg-attain/[0.02]" :
+                                lvl === 2 ? "text-amber-400 border-amber-400/20 bg-amber-400/[0.02]" :
+                                lvl === 1 ? "text-alert border-alert/20 bg-alert/[0.02] font-bold" :
+                                "text-white/5 border-white/5"
                               }`}
                             >
-                              L{lvl}
+                              {lvl ? `L${lvl}` : "—"}
                             </div>
                           );
                         })}
                       </div>
                     </td>
-                    <td className="p-6 text-center">
+                    <td className="py-8 text-center child:text-[10px] child:font-mono child:uppercase child:tracking-widest">
                       {c.remedial ? (
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-400/10 text-amber-400 rounded-full text-[9px] font-mono uppercase">
-                          <AlertCircle className="w-3 h-3" /> Has Level 1 COs
-                        </div>
+                        <span className="text-alert flex items-center justify-center gap-2">
+                          <AlertCircle className="w-3 h-3" /> Flagged
+                        </span>
                       ) : (
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-attain/10 text-attain rounded-full text-[9px] font-mono uppercase">
-                          <CheckCircle2 className="w-3 h-3" /> All &gt;=
-                          {thresholds.level2}%
-                        </div>
+                        <span className="text-attain flex items-center justify-center gap-2">
+                          <CheckCircle2 className="w-3 h-3" /> Qualified
+                        </span>
                       )}
                     </td>
-                    <td className="p-6 text-right">
-                      <button className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white/40 hover:text-alert hover:border-alert/30 transition-all">
-                        <Flag className="w-4 h-4" />
-                        <span className="sr-only">Flag for Review</span>
+                    <td className="py-8 text-right">
+                      <button className="text-[10px] font-mono text-white/20 hover:text-white uppercase tracking-widest flex items-center gap-2 ml-auto">
+                        View Dossier <Flag className="w-3 h-3" />
                       </button>
                     </td>
                   </tr>
@@ -300,50 +286,47 @@ export default function HODCOAttainmentPage() {
           </table>
         </section>
 
-        {/* ── OVERRIDE AUDIT LOG ── */}
-        <section className="flex flex-col gap-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-brand/10 rounded-lg">
-              <History className="w-5 h-5 text-brand" />
-            </div>
-            <h2 className="text-xl font-display text-white">
-              Attainment Override Log
+        {/* ── OVERRIDE AUDIT LOG (FLATTENED) ── */}
+        <section className="mt-24 flex flex-col gap-10">
+          <div className="flex items-center gap-4 border-b border-white/5 pb-6">
+            <History className="w-5 h-5 text-brand" />
+            <h2 className="text-xl font-display text-white uppercase tracking-widest">
+              Manual attainment overrides
             </h2>
           </div>
-          <div className="border border-white/10 bg-white/[0.01] rounded-3xl overflow-hidden shadow-2xl">
+          <div className="overflow-hidden">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-white/5 border-b border-white/10">
-                <tr>
-                  <th className="p-6 text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                    Action
+              <thead>
+                <tr className="border-b border-white/5">
+                  <th className="py-4 text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">
+                    Log Entry
                   </th>
-                  <th className="p-6 text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                    Role
+                  <th className="py-4 text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">
+                    Executor Agent
                   </th>
-                  <th className="p-6 text-[10px] font-mono text-white/20 uppercase tracking-widest">
+                  <th className="py-4 text-[9px] font-mono text-white/20 uppercase tracking-[0.3em] text-right">
                     Timestamp
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5 font-mono text-[11px]">
+              <tbody className="divide-y divide-white/[0.02] font-mono">
                 {overrideEntries.length === 0 ? (
                   <tr>
                     <td
                       colSpan={3}
-                      className="p-8 text-center text-[11px] text-white/30 italic"
+                      className="py-8 text-center text-[10px] text-white/10 italic"
                     >
-                      No manual attainment overrides have been recorded yet for
-                      this academic year.
+                      No overrides recorded in registry.
                     </td>
                   </tr>
                 ) : (
                   overrideEntries.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-white/[0.02]">
-                      <td className="p-6 text-white/70">{entry.action}</td>
-                      <td className="p-6 text-white/40 uppercase">
+                    <tr key={entry.id} className="hover:bg-white/[0.01]">
+                      <td className="py-6 text-[11px] text-white/50">{entry.action}</td>
+                      <td className="py-6 text-[11px] text-white/30 uppercase tracking-widest">
                         {entry.role}
                       </td>
-                      <td className="p-6 text-white/40">{entry.timestamp}</td>
+                      <td className="py-6 text-[11px] text-white/30 text-right">{entry.timestamp}</td>
                     </tr>
                   ))
                 )}

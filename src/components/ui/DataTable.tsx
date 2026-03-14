@@ -176,10 +176,10 @@ export function DataTable<T>({
         </div>
       </div>
 
-      {/* ── TABLE CONTAINER ── */}
-      <div className="border border-white/10 bg-white/[0.01] rounded-2xl overflow-x-auto custom-scrollbar relative">
+      {/* ── TABLE CONTAINER (FLATTENED) ── */}
+      <div className="overflow-x-auto custom-scrollbar relative">
         <table className="w-full text-left border-collapse table-fixed">
-          <thead className={`${stickyHeader ? 'sticky top-0 z-20' : ''} bg-[#0d0d12]`}>
+          <thead className={`${stickyHeader ? 'sticky top-0 z-20' : ''} bg-[#0b0b0f]`}>
             <tr>
               {expandableRow && <th className="w-10 p-4 border-b border-white/10"></th>}
               {initialColumns.map((col, i) => {

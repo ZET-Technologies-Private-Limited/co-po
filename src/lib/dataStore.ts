@@ -73,6 +73,16 @@ export type MarksSubmission = {
   approvedBy?: string;
   approvedAt?: string;   // ISO timestamp when lead approved — used for grievance deadline
   returnReason?: string;
+  leadComment?: string;
+  overrideReason?: string;
+  history?: {
+    id: string;
+    action: "submitted" | "approved" | "returned" | "override";
+    by: string;
+    role: string;
+    at: string;
+    comment?: string;
+  }[];
 };
 
 export type UserRecord = {
@@ -511,10 +521,10 @@ interface DataState {
   updateCO: (courseId: string, coId: string, patch: Partial<CODefinition>) => void;
   deleteCO: (courseId: string, coId: string) => void;
   setCOPOMapping: (courseId: string, mapping: Record<string, Record<string, number>>) => void;
-  setCOOverride?: (
+  setCOOverride: (
     courseId: string,
     coId: string,
-    override: { original: number; overridden: number; by: string; at: string },
+    override: { original: number; overridden: number; by: string; at: string; reason?: string },
   ) => void;
 
   // Exam Config
@@ -562,7 +572,12 @@ interface DataState {
   saveRemedialAction: (courseId: string, coId: string, action: string) => void;
 
   // Submission status update (used by lead approval)
-  updateSubmissionStatus: (courseId: string, examId: string, status: MarksSubmission["status"]) => void;
+  updateSubmissionStatus: (
+    courseId: string,
+    examId: string,
+    status: MarksSubmission["status"],
+    meta?: { by?: string; comment?: string; returnReason?: string; overrideReason?: string; students?: StudentMark[] }
+  ) => void;
 
   // Faculty Notifications
   addFacultyNotification: (n: Omit<FacultyNotification, "id" | "timestamp" | "read">) => void;
@@ -590,6 +605,7 @@ export const useDataStore = create<DataState>()(
       coPOMappings: {},
       examConfigs: DEFAULT_EXAM_CONFIGS,
       submissions: DEFAULT_MARKS,
+      coOverrides: {},
       ay: DEFAULT_AY,
       thresholds: DEFAULT_THRESHOLDS,
       coLibrary: DEFAULT_CO_LIBRARY,
@@ -637,6 +653,16 @@ export const useDataStore = create<DataState>()(
         set(s => ({ cos: { ...s.cos, [courseId]: (s.cos[courseId] || []).filter(c => c.co !== coId) } })),
       setCOPOMapping: (courseId, mapping) =>
         set(s => ({ coPOMappings: { ...s.coPOMappings, [courseId]: mapping } })),
+      setCOOverride: (courseId, coId, override) =>
+        set(s => ({
+          coOverrides: {
+            ...(s.coOverrides || {}),
+            [courseId]: {
+              ...((s.coOverrides || {})[courseId] || {}),
+              [coId]: override,
+            },
+          },
+        })),
 
       // ── Exam Config ──
       addExamConfig: (courseId, exam) =>
@@ -762,12 +788,33 @@ export const useDataStore = create<DataState>()(
         set(s => ({ grievances: s.grievances.map(g => g.id === id ? { ...g, status, ...(resolution ? { resolution } : {}), ...(updatedMarks !== undefined ? { updatedMarks } : {}) } : g) })),
 
       // ── Submission Status ──
-      updateSubmissionStatus: (courseId, examId, status) =>
+      updateSubmissionStatus: (courseId, examId, status, meta) =>
         set(s => ({
           submissions: {
             ...s.submissions,
             [courseId]: (s.submissions[courseId] || []).map(m =>
-              m.examId === examId ? { ...m, status } : m
+              m.examId === examId
+                ? {
+                    ...m,
+                    status,
+                    ...(status === "approved" ? { approvedAt: new Date().toISOString(), approvedBy: meta?.by } : {}),
+                    ...(status === "returned" ? { returnReason: meta?.returnReason || m.returnReason } : {}),
+                    ...(meta?.comment ? { leadComment: meta.comment } : {}),
+                    ...(meta?.overrideReason ? { overrideReason: meta.overrideReason } : {}),
+                    ...(meta?.students ? { students: meta.students } : {}),
+                    history: [
+                      ...(m.history || []),
+                      {
+                        id: uid(),
+                        action: status === "approved" ? "approved" : status === "returned" ? "returned" : "submitted",
+                        by: meta?.by || "system",
+                        role: "subject_lead",
+                        at: now(),
+                        comment: meta?.comment || meta?.returnReason || meta?.overrideReason,
+                      },
+                    ],
+                  }
+                : m
             )
           }
         })),

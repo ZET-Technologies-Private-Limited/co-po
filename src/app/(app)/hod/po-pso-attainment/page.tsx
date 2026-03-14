@@ -177,61 +177,39 @@ export default function DeptPOPSOAttainmentPage() {
           </div>
         </header>
 
-        {/* ── TARGET VS ACTUAL SUMMARY ── */}
-        <section className="grid md:grid-cols-4 gap-6">
-          {poTargets.map((p) => (
-            <div
-              key={p.id}
-              className={`p-8 border rounded-3xl flex flex-col gap-6 ${
-                p.status === "Critical"
-                  ? "border-alert/20 bg-alert/[0.01]"
-                  : "border-white/10 bg-white/[0.02]"
-              }`}
-            >
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-mono text-white/30 uppercase tracking-widest">
-                    {p.id}
-                  </span>
-                  <h3 className="text-xs font-bold text-white">{p.name}</h3>
+        {/* ── TARGET VS ACTUAL SUMMARY (FLATTENED) ── */}
+        <section className="flex flex-col gap-12 border-b border-white/5 pb-16">
+          <h2 className="text-xl font-display text-white uppercase tracking-widest flex items-center gap-4">
+             <Target className="w-5 h-5 text-orange-400" /> Strategic Benchmarks
+          </h2>
+          <div className="flex justify-between items-start gap-12 overflow-x-auto pb-4">
+            {poTargets.map((p) => (
+              <div key={p.id} className="flex-1 min-w-[200px] flex flex-col gap-4">
+                <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                  <span className="text-[10px] font-mono text-brand uppercase tracking-widest">{p.id}</span>
+                  {p.status === "Critical" ? (
+                    <TrendingDown className="w-3.5 h-3.5 text-alert" />
+                  ) : (
+                    <div className="w-1 h-1 rounded-full bg-attain" />
+                  )}
                 </div>
-                {p.status === "Critical" ? (
-                  <TrendingDown className="w-4 h-4 text-alert" />
-                ) : (
-                  <Target className="w-4 h-4 text-attain" />
-                )}
-              </div>
-              <div className="space-y-4">
-                <div className="flex justify-between items-baseline">
-                  <span className="text-2xl font-display text-white">
-                    {p.actual}%
-                  </span>
-                  <span className="text-[10px] font-mono text-white/20">
-                    Target: {p.target}%
-                  </span>
+                <div>
+                  <h3 className="text-[11px] font-bold text-white/60 truncate uppercase font-mono tracking-tight">{p.name}</h3>
+                  <div className="flex items-baseline gap-2 mt-4">
+                    <span className="text-4xl font-display text-white">{p.actual}%</span>
+                    <span className="text-[10px] font-mono text-white/20">/ {p.target}%</span>
+                  </div>
                 </div>
-                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                <div className="h-0.5 bg-white/5 w-full">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${p.actual}%` }}
-                    className={`h-full ${
-                      p.status === "Critical" ? "bg-alert" : "bg-attain"
-                    }`}
+                    className={`h-full ${p.status === "Critical" ? "bg-alert" : "bg-attain"}`}
                   />
                 </div>
-                <div className="flex justify-between items-center text-[8px] font-mono uppercase tracking-tighter">
-                  <span
-                    className={
-                      p.status === "Critical" ? "text-alert" : "text-attain"
-                    }
-                  >
-                    Gap: {p.actual - p.target}%
-                  </span>
-                  <span className="text-white/20">NBA Tier 1</span>
-                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </section>
 
         {/* ── PO CONTRIBUTION MATRIX ── */}

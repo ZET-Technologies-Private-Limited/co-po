@@ -15,7 +15,7 @@ import { useUIStore } from "@/lib/uiStore";
 import { useAuthStore, Role } from "@/lib/authStore";
 import {
   LayoutDashboard, BookOpen, BarChart3, FileText, Bot, Users, Settings,
-  Bell, Search, Layers, Lock, Menu, X, ChevronDown, MessageSquare
+  Bell, Search, Layers, Lock, Menu, X, ChevronDown, MessageSquare, TrendingUp
 } from "lucide-react";
 
 const Clock = ({ className }: { className?: string }) => (
@@ -26,12 +26,12 @@ const Clock = ({ className }: { className?: string }) => (
 
 const ROLE_NAV_CONFIG: Record<Role, { href: string; label: string; icon: any }[]> = {
   admin: [
-    { href: "/dashboard",           label: "System Hub",   icon: LayoutDashboard },
+    { href: "/admin/dashboard",     label: "System Hub",   icon: LayoutDashboard },
     { href: "/admin/users",          label: "Users",        icon: Users },
     { href: "/admin/academic-year",  label: "AY Config",    icon: Settings },
     { href: "/admin/thresholds",     label: "Thresholds",   icon: BarChart3 },
     { href: "/admin/co-library",     label: "CO Library",   icon: BookOpen },
-    { href: "/co-po-matrix",         label: "CO-PO Matrix", icon: Layers },
+    { href: "/admin/po-pso",         label: "PO / PSO",     icon: Layers },
     { href: "/admin/audit-log",      label: "Audit Trail",  icon: FileText },
   ],
   department_head: [
@@ -52,6 +52,8 @@ const ROLE_NAV_CONFIG: Record<Role, { href: string; label: string; icon: any }[]
     { href: "/lead/marks-approval",  label: "Queue",        icon: BookOpen },
     { href: "/lead/co-attainment",   label: "CO Tracking",  icon: BarChart3 },
     { href: "/lead/po-attainment",   label: "PO Tracking",  icon: Layers },
+    { href: "/lead/ay-comparison",   label: "AY Compare",   icon: TrendingUp },
+    { href: "/lead/reports",         label: "Reports",      icon: FileText },
     { href: "/co-library",           label: "CO Library",   icon: BookOpen },
     { href: "/co-po-matrix",         label: "CO-PO Matrix", icon: Layers },
     { href: "/low-co-alerts",        label: "Alerts",       icon: Bell },

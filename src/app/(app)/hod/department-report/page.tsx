@@ -327,32 +327,35 @@ export default function HODDeptReportPage() {
           </div>
         </header>
 
-        {/* ── REPORT DOCUMENT BODY ── */}
-        <div className="bg-white/[0.01] border border-white/10 p-16 rounded-[3rem] shadow-3xl space-y-24">
+        {/* ── REPORT DOCUMENT BODY (FLATTENED) ── */}
+        <div className="space-y-32">
           {/* Section 1: Cover Page */}
-          <section className="flex flex-col items-center text-center gap-12 border-b border-white/5 pb-24">
-            <div className="w-24 h-24 rounded-full bg-brand/5 border border-brand/20 flex items-center justify-center p-6">
-              <div className="w-full h-full bg-brand/40 rounded-full blur-xl animate-pulse" />
+          <section className="flex flex-col items-start gap-12 border-b border-white/5 pb-24">
+            <div className="flex items-center gap-6">
+              <div className="w-16 h-16 rounded-full bg-brand/5 border border-brand/20 flex items-center justify-center p-4">
+                <FileText className="w-full h-full text-brand" />
+              </div>
+              <div>
+                <h2 className="text-5xl font-display text-white tracking-tight">
+                  OBE Report <span className="text-white/20">Consolidated</span>
+                </h2>
+                <p className="text-lg font-light text-white/40 italic mt-2">
+                  {user?.department || "Department"} · Quality Assurance Archive
+                </p>
+              </div>
             </div>
-            <div className="space-y-4">
-              <h2 className="text-4xl font-display text-white">
-                Consolidated OBE Performance Report
-              </h2>
-              <p className="text-lg font-light text-white/40 max-w-xl mx-auto italic">
-                {user?.department || "Department"} · Institutional Quality Cell
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-12 pt-8 w-full max-w-3xl border-t border-white/5 mt-12">
+            
+            <div className="flex gap-24 pt-12 items-end">
               {[
-                { label: "Academic Year", val: activeAY },
-                { label: "Total Courses", val: deptCourses.length },
-                { label: "Prepared Date", val: reportDate },
+                { label: "Cycle Phase", val: activeAY },
+                { label: "Course Sample", val: deptCourses.length },
+                { label: "Audit Timestamp", val: reportDate },
               ].map((stat, i) => (
                 <div key={i} className="flex flex-col gap-2">
-                  <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">
+                  <span className="text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">
                     {stat.label}
                   </span>
-                  <span className="text-sm font-bold text-white uppercase">
+                  <span className="text-xl font-display text-white uppercase">
                     {stat.val}
                   </span>
                 </div>
@@ -361,38 +364,34 @@ export default function HODDeptReportPage() {
           </section>
 
           {/* Section 2: Executive Attainment Summary */}
-          <section className="space-y-12">
-            <div className="flex items-center gap-4">
-              <span className="text-2xl font-mono text-white/10 italic">
-                01.
-              </span>
-              <h3 className="text-2xl font-display text-white uppercase tracking-widest">
-                Attainment Summary
+          <section className="space-y-16">
+            <div className="flex items-center gap-6 border-b border-white/5 pb-8">
+              <span className="text-3xl font-display text-white/10 italic">01.</span>
+              <h3 className="text-2xl font-display text-white uppercase tracking-[0.2em]">
+                Strategic Attainment Matrix
               </h3>
             </div>
-            <div className="grid lg:grid-cols-2 gap-12">
-              <div className="p-8 border border-white/10 bg-white/[0.01] rounded-[2rem] space-y-8">
-                <h4 className="text-xs font-mono text-white/30 uppercase tracking-[0.2em] flex items-center gap-2">
-                  <BarChart className="w-4 h-4 text-attain" /> Dept-Wide PO
-                  Attainment
+            <div className="grid lg:grid-cols-2 gap-32">
+              <div className="space-y-12">
+                <h4 className="text-[10px] font-mono text-orange-400 uppercase tracking-[0.3em] flex items-center gap-3">
+                  <BarChart className="w-4 h-4" /> Dept-Wide PO Profile
                 </h4>
-                <div className="space-y-6">
+                <div className="space-y-10">
                   {poRows.map((row) => (
-                    <div key={row.id} className="space-y-2">
-                      <div className="flex justify-between text-[10px] font-mono text-white/60">
-                        <span>
-                          {row.id} Attainment · {row.name}
+                    <div key={row.id} className="space-y-4">
+                      <div className="flex justify-between items-end">
+                        <span className="text-[10px] font-mono text-white/40 uppercase tracking-widest leading-none">
+                          {row.id} · {row.name}
                         </span>
-                        <span>{row.pct}%</span>
+                        <span className={`text-lg font-display ${row.pct < thresholds.level2 ? "text-alert" : "text-white"}`}>
+                          {row.pct}%
+                        </span>
                       </div>
-                      <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                      <div className="h-0.5 bg-white/5 w-full">
                         <div
                           className={`h-full ${
-                            row.status === "Met"
-                              ? "bg-attain"
-                              : row.status === "Monitor"
-                              ? "bg-amber-400"
-                              : "bg-alert"
+                            row.status === "Met" ? "bg-attain" : 
+                            row.status === "Monitor" ? "bg-amber-400" : "bg-alert"
                           }`}
                           style={{ width: `${row.pct}%` }}
                         />
@@ -401,36 +400,30 @@ export default function HODDeptReportPage() {
                   ))}
                 </div>
               </div>
-              <div className="p-8 border border-white/10 bg-white/[0.01] rounded-[2rem] space-y-8">
-                <h4 className="text-xs font-mono text-white/30 uppercase tracking-[0.2em] flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-brand" /> Institutional
-                  Benchmarks
+
+              <div className="space-y-12">
+                <h4 className="text-[10px] font-mono text-orange-400 uppercase tracking-[0.3em] flex items-center gap-3">
+                  <ShieldCheck className="w-4 h-4" /> Institutional Benchmarks
                 </h4>
-                <div className="space-y-8">
-                  <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 rounded-full border-4 border-attain/20 border-t-attain flex items-center justify-center font-display text-white text-lg">
-                      {avgCO}%
+                <div className="space-y-12">
+                  <div className="flex items-center gap-10">
+                    <div className="w-20 h-20 rounded-full border border-white/5 flex flex-col items-center justify-center">
+                      <span className="text-[9px] font-mono text-attain uppercase">AVG</span>
+                      <span className="text-2xl font-display text-white">{avgCO}%</span>
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-white">
-                        Average CO Attainment
-                      </p>
-                      <p className="text-[10px] text-white/30 mt-1 uppercase">
-                        Based on approved CIE+SEE marks
-                      </p>
+                    <div className="space-y-2">
+                      <p className="text-sm font-bold text-white uppercase">Average CO Attainment</p>
+                      <p className="text-[10px] text-white/30 font-mono italic">Calculated from {activeAY} approved CIE+SEE marks</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 rounded-full border-4 border-amber-400/20 border-t-amber-400 flex items-center justify-center font-display text-white text-lg">
-                      {syllabusIndex}%
+                  <div className="flex items-center gap-10">
+                    <div className="w-20 h-20 rounded-full border border-white/5 flex flex-col items-center justify-center">
+                      <span className="text-[9px] font-mono text-amber-500 uppercase">INDEX</span>
+                      <span className="text-2xl font-display text-white">{syllabusIndex}%</span>
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-white">
-                        Syllabus Completion Index
-                      </p>
-                      <p className="text-[10px] text-white/30 mt-1 uppercase">
-                        Exams with approved marks vs configured
-                      </p>
+                    <div className="space-y-2">
+                      <p className="text-sm font-bold text-white uppercase">Syllabus Completion Index</p>
+                      <p className="text-[10px] text-white/30 font-mono italic">Functional audit of course-level approval cycles</p>
                     </div>
                   </div>
                 </div>
@@ -439,121 +432,74 @@ export default function HODDeptReportPage() {
           </section>
 
           {/* Section 3: Faculty Performance & Operations */}
-          <section className="space-y-12">
-            <div className="flex items-center gap-4">
-              <span className="text-2xl font-mono text-white/10 italic">
-                02.
-              </span>
-              <h3 className="text-2xl font-display text-white uppercase tracking-widest">
-                Faculty Audit
+          <section className="space-y-16">
+            <div className="flex items-center gap-6 border-b border-white/5 pb-8">
+              <span className="text-3xl font-display text-white/10 italic">02.</span>
+              <h3 className="text-2xl font-display text-white uppercase tracking-[0.2em]">
+                Faculty Compliance Audit
               </h3>
             </div>
-            <div className="border border-white/10 rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-white/5 text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                  <tr>
-                    <th className="p-6">Faculty</th>
-                    <th className="p-6">Courses</th>
-                    <th className="p-6 text-center">Submission Status</th>
-                    <th className="p-6 text-center">Timeliness</th>
+                <thead>
+                  <tr className="border-b border-white/5">
+                    <th className="py-4 text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">Identity</th>
+                    <th className="py-4 text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">Load Assignments</th>
+                    <th className="py-4 text-center text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">Cycle Progress</th>
+                    <th className="py-4 text-right text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">Health</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5 text-xs text-white/60">
-                  {facultyRows.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="p-6 text-center text-white/30 italic"
-                      >
-                        No faculty records found for this department.
+                <tbody className="divide-y divide-white/[0.02]">
+                  {facultyRows.map((f, i) => (
+                    <tr key={i} className="hover:bg-white/[0.01]">
+                      <td className="py-8 font-bold text-white uppercase text-sm tracking-tight">{f.name}</td>
+                      <td className="py-8 text-xs text-white/40 font-mono italic">{f.courses}</td>
+                      <td className="py-8 text-center">
+                        <span className={`text-xl font-display ${f.status === "100%" ? "text-attain" : "text-amber-400"}`}>
+                          {f.status}
+                        </span>
+                      </td>
+                      <td className="py-8 text-right font-mono text-[9px] uppercase tracking-[0.2em]">
+                        <span className={f.time === "Delayed" ? "text-alert" : "text-white/20"}>
+                          {f.time}
+                        </span>
                       </td>
                     </tr>
-                  ) : (
-                    facultyRows.map((f, i) => (
-                      <tr key={i}>
-                        <td className="p-6 font-bold text-white uppercase">
-                          {f.name}
-                        </td>
-                        <td className="p-6">{f.courses}</td>
-                        <td className="p-6 text-center">
-                          <span
-                            className={`px-2 py-1 rounded-full text-[9px] font-mono ${
-                              f.status === "100%"
-                                ? "bg-attain/10 text-attain"
-                                : "bg-amber-400/10 text-amber-400"
-                            }`}
-                          >
-                            {f.status}
-                          </span>
-                        </td>
-                        <td className="p-6 text-center">
-                          <span
-                            className={`text-[10px] font-mono uppercase ${
-                              f.time === "Delayed"
-                                ? "text-alert"
-                                : "text-white/40"
-                            }`}
-                          >
-                            {f.time}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </section>
 
           {/* Section 4: AI Analysis & Recommendations */}
-          <section className="space-y-12 bg-white/5 -mx-16 p-16 border-y border-white/5">
-            <div className="flex items-center gap-4">
-              <span className="text-2xl font-mono text-white/10 italic">
-                03.
-              </span>
-              <h3 className="text-2xl font-display text-white uppercase tracking-widest flex items-center gap-4">
-                <Sparkles className="w-6 h-6 text-brand" /> Strategic
-                Recommendations
+          <section className="space-y-16 pt-16 border-t border-white/5">
+            <div className="flex items-center gap-6">
+              <span className="text-3xl font-display text-white/10 italic">03.</span>
+              <h3 className="text-2xl font-display text-white uppercase tracking-[0.2em] flex items-center gap-4">
+                Strategic Recommendations
               </h3>
             </div>
-            <div className="grid lg:grid-cols-3 gap-12">
-              <div className="space-y-4">
-                <div className="bg-brand/10 w-10 h-10 rounded-xl flex items-center justify-center text-brand font-bold font-mono">
-                  1
+            <div className="grid lg:grid-cols-3 gap-16">
+              {[
+                { 
+                  title: "Consolidate L3 Outcomes", 
+                  txt: "Prioritize sustaining PO/COs already in Level 3 by documenting successful pedagogy patterns and assessment designs." 
+                },
+                { 
+                  title: "Lift Level 2 Bands", 
+                  txt: "For POs and COs in Level 2, align internal evaluation weight and question design with configured thresholds." 
+                },
+                { 
+                  title: "Close Level 1 Gaps", 
+                  txt: "Ensure every Level 1 CO has a remedial journal entry and a closure note before triggering year-end lock." 
+                }
+              ].map((rec, i) => (
+                <div key={i} className="space-y-6">
+                  <div className="text-[10px] font-mono text-orange-400 uppercase tracking-widest border-b border-orange-400/20 pb-2">Phase 0{i+1}</div>
+                  <h4 className="text-sm font-bold text-white uppercase">{rec.title}</h4>
+                  <p className="text-xs text-white/40 leading-relaxed font-light italic">{rec.txt}</p>
                 </div>
-                <h4 className="text-sm font-bold text-white uppercase">
-                  Consolidate Level 3 Outcomes
-                </h4>
-                <p className="text-xs text-white/40 leading-relaxed font-light italic">
-                  Prioritize sustaining PO/COs already in Level 3 by documenting
-                  successful pedagogy patterns and assessment designs.
-                </p>
-              </div>
-              <div className="space-y-4">
-                <div className="bg-brand/10 w-10 h-10 rounded-xl flex items-center justify-center text-brand font-bold font-mono">
-                  2
-                </div>
-                <h4 className="text-sm font-bold text-white uppercase">
-                  Lift Level 2 Bands
-                </h4>
-                <p className="text-xs text-white/40 leading-relaxed font-light italic">
-                  For POs and COs in Level 2, align internal evaluation weight
-                  and question design with the configured thresholds to avoid
-                  borderline cases.
-                </p>
-              </div>
-              <div className="space-y-4">
-                <div className="bg-brand/10 w-10 h-10 rounded-xl flex items-center justify-center text-brand font-bold font-mono">
-                  3
-                </div>
-                <h4 className="text-sm font-bold text-white uppercase">
-                  Close Level 1 Gaps
-                </h4>
-                <p className="text-xs text-white/40 leading-relaxed font-light italic">
-                  Ensure every Level 1 CO has a remedial journal entry and a
-                  closure note before triggering the year-end lock workflow.
-                </p>
-              </div>
+              ))}
             </div>
           </section>
         </div>

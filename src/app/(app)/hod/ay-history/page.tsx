@@ -87,97 +87,63 @@ export default function HODAYHistoryPage() {
           </div>
         </header>
 
-        {/* ── PO SNAPSHOT (SIMPLE BAR) ── */}
-        <section className="p-10 border border-white/10 bg-white/[0.01] rounded-[2.5rem] flex flex-col gap-6">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-white/5 rounded-2xl">
-                <TrendingUp className="w-6 h-6 text-brand" />
-              </div>
-              <h2 className="text-2xl font-display text-white">PO/CO Attainment Snapshot</h2>
+        {/* ── PO SNAPSHOT (FLATTENED) ── */}
+        <section className="flex items-center gap-12 border-b border-white/5 pb-16">
+          <div className="flex items-center gap-8">
+            <div className="w-20 h-20 rounded-full border border-white/5 flex flex-col items-center justify-center">
+              <span className="text-[9px] font-mono text-brand uppercase">AVG</span>
+              <span className="text-2xl font-display text-white">{poSnapshot}%</span>
             </div>
-            <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">
-              AY {activeAY} · Computed from approved marks
-            </p>
-          </div>
-          <div className="flex items-center gap-6">
-            <div className="w-20 h-20 rounded-full border-4 border-brand/20 border-t-brand flex items-center justify-center font-display text-white text-xl">
-              {poSnapshot}%
+            <div className="space-y-2">
+              <h2 className="text-sm font-bold text-white uppercase tracking-widest">PO/CO Attainment Profile</h2>
+              <p className="text-[10px] text-white/30 font-mono italic max-w-sm leading-relaxed">
+                Aggregated departmental health index for AY {activeAY}. 
+                Multi-year trajectories will populate post-import.
+              </p>
             </div>
-            <p className="text-xs text-white/50 max-w-xl">
-              This value approximates overall CO health across the department. For detailed PO and PSO profiles, use the PO/PSO attainment screens.
-            </p>
           </div>
         </section>
 
         <div className="grid lg:grid-cols-3 gap-12">
           {/* ── LEFT: CO TABLE ── */}
-          <div className="lg:col-span-2 space-y-8">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-display text-white flex items-center gap-3">
-                <BarChart3 className="w-5 h-5 text-brand" /> Outcome Sustainability (Current AY)
-              </h2>
-            </div>
-            <div className="border border-white/10 bg-white/[0.01] rounded-3xl overflow-hidden shadow-2xl">
+          <div className="lg:col-span-2 space-y-12">
+            <h2 className="text-xl font-display text-white border-b border-white/5 pb-6 flex items-center gap-4 uppercase tracking-widest">
+               <BarChart3 className="w-5 h-5 text-orange-400" /> Outcome Sustainability
+            </h2>
+            <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-white/5 border-b border-white/10 text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                  <tr>
-                    <th className="p-6">Course Outcome</th>
-                    <th className="p-6 text-center">Current AY %</th>
-                    <th className="p-6 text-right">Status</th>
+                <thead>
+                  <tr className="border-b border-white/5">
+                    <th className="py-4 text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">Course Outcome Identity</th>
+                    <th className="py-4 text-center text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">Attainment %</th>
+                    <th className="py-4 text-right text-[9px] font-mono text-white/20 uppercase tracking-[0.3em]">Classification</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y divide-white/[0.02]">
                   {trendTable.length === 0 ? (
                     <tr>
-                      <td
-                        colSpan={3}
-                        className="p-8 text-center text-[11px] text-white/30 italic"
-                      >
-                        No approved marks available yet to build an AY history.
+                      <td colSpan={3} className="py-12 text-center text-xs text-white/10 italic font-mono">
+                        No approved marks recorded for this academic cycle.
                       </td>
                     </tr>
                   ) : (
                     trendTable.map((item, i) => (
-                      <tr
-                        key={`${item.code}-${item.co}-${i}`}
-                        className={`hover:bg-white/[0.02] transition-colors ${
-                          item.consecutiveL1 ? "bg-alert/[0.01]" : ""
-                        }`}
-                      >
-                        <td className="p-6">
-                          <div className="flex items-center gap-4">
-                            {item.consecutiveL1 && (
-                              <AlertTriangle className="w-4 h-4 text-alert animate-bounce" />
-                            )}
-                            <div>
-                              <p className="text-xs font-bold text-white uppercase">
-                                {item.code} · {item.co}
-                              </p>
-                              <p className="text-[10px] text-white/30 mt-0.5">
-                                {item.name}
-                              </p>
-                            </div>
-                          </div>
+                      <tr key={`${item.code}-${item.co}-${i}`} className="hover:bg-white/[0.01] transition-colors">
+                        <td className="py-8">
+                          <p className="text-sm font-bold text-white tracking-tight">{item.code} · {item.co}</p>
+                          <p className="text-[11px] text-white/30 mt-1 uppercase font-mono tracking-tighter">{item.name}</p>
                         </td>
-                        <td className="p-6 text-center font-mono text-xs text-white/60">
-                          {item.current}%
+                        <td className="py-8 text-center">
+                          <span className={`text-lg font-display ${item.current < thresholds.level2 ? "text-alert" : "text-white"}`}>
+                            {item.current}%
+                          </span>
                         </td>
-                        <td className="p-6 text-right">
-                          <span
-                            className={`text-[10px] font-mono uppercase ${
-                              item.current < thresholds.level2
-                                ? "text-alert"
-                                : item.current < thresholds.level3
-                                ? "text-amber-400"
-                                : "text-attain"
-                            }`}
-                          >
-                            {item.current < thresholds.level2
-                              ? "Level 1"
-                              : item.current < thresholds.level3
-                              ? "Level 2"
-                              : "Level 3"}
+                        <td className="py-8 text-right">
+                          <span className={`text-[10px] font-mono uppercase tracking-widest ${
+                            item.current < thresholds.level2 ? "text-alert" : 
+                            item.current < thresholds.level3 ? "text-amber-400" : "text-attain"
+                          }`}>
+                            Level {item.current < thresholds.level2 ? "1" : item.current < thresholds.level3 ? "2" : "3"}
                           </span>
                         </td>
                       </tr>
@@ -188,62 +154,52 @@ export default function HODAYHistoryPage() {
             </div>
           </div>
 
-          {/* ── RIGHT: GAP REPORT ── */}
-          <div className="space-y-8">
-            <h2 className="text-xl font-display text-white flex items-center gap-3">
-              <Sparkles className="w-5 h-5 text-brand" /> Curricular Gap Report
+          <div className="space-y-12">
+            <h2 className="text-xl font-display text-white border-b border-white/5 pb-6 flex items-center gap-4 uppercase tracking-widest">
+               <Sparkles className="w-5 h-5 text-orange-400" /> Gap Intelligence
             </h2>
-            <div className="p-8 border border-brand/20 bg-brand/[0.02] rounded-[2rem] space-y-8 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-10">
-                <FileSearch className="w-20 h-20 text-brand" />
-              </div>
-
+            <div className="space-y-10">
               <div className="space-y-4">
-                <div className="px-3 py-1 bg-brand/10 border border-brand/20 rounded-full w-fit text-[8px] font-mono text-brand uppercase tracking-widest">
-                  AI Intelligence Summary
-                </div>
-                <h3 className="text-lg font-display text-white italic">
-                  "Level 1 Outcomes Require Closure"
-                </h3>
-                <p className="text-xs text-white/50 leading-relaxed">
-                  This view highlights COs that are currently below the Level 2 threshold for the active AY.
-                  Use the CO attainment and remedial journals to document and close each case before initiating the year-end lock.
+                <span className="text-[9px] font-mono text-orange-400 uppercase tracking-[0.3em]">AI Synthesis</span>
+                <p className="text-xl font-display text-white leading-relaxed italic">
+                  "Level 1 outcomes indicate foundational gaps in prerequisites or assessment misalignment."
                 </p>
               </div>
 
-              <div className="space-y-6 pt-6 border-t border-white/5">
-                <div>
-                  <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-3">
-                    Probable Root Causes (Generic)
-                  </p>
-                  <ul className="space-y-2">
-                    <li className="text-[11px] text-white/70 flex items-start gap-2">
-                      <div className="w-1 h-1 rounded-full bg-brand mt-1.5" />
-                      Misalignment between CO level and question paper Bloom&apos;s level.
-                    </li>
-                    <li className="text-[11px] text-white/70 flex items-start gap-2">
-                      <div className="w-1 h-1 rounded-full bg-brand mt-1.5" />
-                      Prerequisite gaps in earlier courses or foundational subjects.
-                    </li>
+              <div className="space-y-8 pt-8 border-t border-white/5">
+                <div className="space-y-6">
+                  <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest leading-none">Primary Bottlenecks</p>
+                  <ul className="space-y-4">
+                    {[
+                      "Misalignment between CO level and question Bloom's depth.",
+                      "Prerequisite degradation in foundational course branches."
+                    ].map((txt, i) => (
+                      <li key={i} className="flex gap-4 items-start">
+                        <div className="w-1 h-1 rounded-full bg-brand mt-1.5" />
+                        <p className="text-xs text-white/60 leading-relaxed font-light">{txt}</p>
+                      </li>
+                    ))}
                   </ul>
                 </div>
-                <div>
-                  <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-3">
-                    Recommendations
-                  </p>
-                  <div className="p-4 bg-white/5 rounded-xl border border-white/5 space-y-3">
-                    <p className="text-[10px] text-white/80 font-medium">
-                      1. Introduce bridge or revision modules for courses with repeated Level 1 outcomes.
-                    </p>
-                    <p className="text-[10px] text-white/80 font-medium">
-                      2. Align question paper design and internal assessment weights with configured attainment thresholds.
-                    </p>
+                
+                <div className="space-y-6">
+                  <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest leading-none">Intervention Plan</p>
+                  <div className="space-y-4">
+                    {[
+                      "Deploy bridge modules for repeated Level 1 course branches.",
+                      "Calibrate internal assessment weights with NBA thresholds."
+                    ].map((txt, i) => (
+                      <div key={i} className="flex gap-4 items-center bg-white/[0.01] border border-white/5 p-4 rounded-xl">
+                        <div className="text-[10px] font-mono text-white/20">0{i+1}</div>
+                        <p className="text-[11px] text-white/70 font-medium">{txt}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
 
-              <button className="w-full py-3 bg-white/5 border border-white/10 rounded-xl text-[10px] font-mono text-white/40 uppercase tracking-[0.2em] hover:bg-brand hover:text-white transition-all flex items-center justify-center gap-3">
-                Download Current AY Gap Summary <Calendar className="w-3.5 h-3.5" />
+              <button className="w-full py-4 text-[10px] font-mono text-orange-400 hover:text-white border border-orange-400/20 hover:border-white transition-all uppercase tracking-widest flex items-center justify-center gap-3">
+                Download Audit Summary <Calendar className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
