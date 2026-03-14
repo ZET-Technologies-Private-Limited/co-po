@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { 
-  User, Mail, Phone, Building2, Shield, Moon, Sun, Monitor, LogOut, Link2
+  User, Mail, Phone, Building2, Shield, Moon, Sun, Monitor, LogOut, Link2, Settings
 } from "lucide-react";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
 import { useAuthStore } from "@/lib/authStore";
@@ -82,9 +82,9 @@ export default function ProfilePage() {
                <div className="flex flex-col gap-4 border-b border-white/5 pb-6">
                   <span className="text-[10px] font-mono text-white/30 uppercase tracking-widest">Interface Theme</span>
                   <div className="flex bg-black/40 p-1 rounded-lg border border-white/10">
-                     <button className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md bg-white/10 text-white text-xs font-mono uppercase tracking-widest"><Moon className="w-3.5 h-3.5" /> Dark</button>
-                     <button className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white/30 hover:text-white transition-colors text-xs font-mono uppercase tracking-widest"><Sun className="w-3.5 h-3.5" /> Light</button>
-                     <button className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white/30 hover:text-white transition-colors text-xs font-mono uppercase tracking-widest"><Monitor className="w-3.5 h-3.5" /> Auto</button>
+                     <button onClick={() => addToast("Theme locked to Dark Mode", "success")} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md bg-white/10 text-white text-xs font-mono uppercase tracking-widest"><Moon className="w-3.5 h-3.5" /> Dark</button>
+                     <button onClick={() => addToast("Theme locked to Light Mode", "success")} className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white/30 hover:text-white transition-colors text-xs font-mono uppercase tracking-widest"><Sun className="w-3.5 h-3.5" /> Light</button>
+                     <button onClick={() => addToast("Theme set to System Default", "info")} className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white/30 hover:text-white transition-colors text-xs font-mono uppercase tracking-widest"><Monitor className="w-3.5 h-3.5" /> Auto</button>
                   </div>
                </div>
                <div className="flex flex-col gap-4">

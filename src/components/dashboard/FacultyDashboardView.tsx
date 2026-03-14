@@ -1,250 +1,222 @@
 "use client";
 
+import { useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useState } from "react";
 import Link from "next/link";
-import {
-  BookOpen, BarChart3, AlertTriangle, CheckCircle2, Clock, ChevronRight,
-  ArrowRight, Upload, FileCheck, Loader2, Bell, Target
+import { 
+  Layers, CheckCircle, Clock, AlertTriangle, 
+  ChevronRight, BarChart3, Users, BookOpen, 
+  CheckCircle2, AlertCircle, Calendar, Plus,
+  FileSpreadsheet, ArrowUpRight
 } from "lucide-react";
-import { staggerContainer, fadeSlideUp } from "@/lib/animations";
 import { useAuthStore } from "@/lib/authStore";
-import { useUIStore } from "@/lib/uiStore";
-import { COURSE_COS, getAttainmentLevel, getCurricularGaps } from "@/lib/appData";
-
-// ─── MOCK DATA (spec-aligned) ────────────────────────────────────────────
-const MY_COURSES = [
-  {
-    id: "cs301", code: "CS301", name: "Database Management Systems",
-    semester: 5, students: 60, dept: "Computer Science",
-    cosGenerated: 6, cosPending: 0,
-  },
-  {
-    id: "ec201", code: "EC201", name: "Digital Signal Processing",
-    semester: 4, students: 55, dept: "Electronics",
-    cosGenerated: 4, cosPending: 2,
-  },
-];
-
-type MarkStatus = "Not Started" | "In Progress" | "Submitted" | "Approved";
-const MARKS_STATUS: Record<string, Record<string, MarkStatus>> = {
-  cs301: { T1: "Approved", T2: "Submitted", T3: "In Progress", T4: "Not Started", T5: "Not Started", SEE: "Not Started" },
-  ec201: { T1: "Approved", T2: "Not Started", T3: "Not Started", T4: "Not Started", T5: "Not Started", SEE: "Not Started" },
-};
-
-const PENDING_ACTIONS = [
-  { id: 1, text: "T2 marks not yet submitted for CS301", href: "/courses/cs301/exams/t2/marks", priority: "high" },
-  { id: 2, text: "T3 marks still In Progress for CS301 — submit for Lead approval", href: "/courses/cs301/exams/t3/marks", priority: "medium" },
-  { id: 3, text: "CO3 (CS301) is Level 1 — log remedial action before year-end", href: "/courses/cs301/co-attainment", priority: "high" },
-  { id: 4, text: "EC201: CO5 & CO6 not yet generated — complete syllabus upload", href: "/courses/ec201/generate-co", priority: "medium" },
-];
-
-const STATUS_COLOR: Record<MarkStatus, string> = {
-  "Not Started": "text-white/30 bg-white/5",
-  "In Progress": "text-aurora bg-aurora/10",
-  "Submitted":   "text-brand bg-brand/10",
-  "Approved":    "text-attain bg-attain/10",
-};
-
-const AY_OPTIONS = ["2024-25", "2023-24", "2022-23"];
+import { useDataStore } from "@/lib/dataStore";
+import { computeCOAttainmentFromMarks } from "@/lib/computations";
+import { staggerContainer, fadeSlideUp } from "@/lib/animations";
 
 export function FacultyDashboardView() {
-  const { user, activeAY, setActiveAY } = useAuthStore();
-  const { addToast } = useUIStore();
-  const isPastAY = activeAY !== "2024-25";
+  const { user }         = useAuthStore();
+  const courses          = useDataStore(s => s.courses);
+  const submissions      = useDataStore(s => s.submissions);
+  const examConfigs      = useDataStore(s => s.examConfigs);
+  const cos              = useDataStore(s => s.cos);
+  const thresholds       = useDataStore(s => s.thresholds);
+  const ay               = useDataStore(s => s.ay);
+
+  // Filter courses for this faculty
+  const myCourses = useMemo(() => 
+    courses.filter(c => c.facultyId === user?.id || !c.facultyId), 
+    [courses, user]);
+
+  // Aggregate stats across all my courses
+  const stats = useMemo(() => {
+    let totalCOs = 0;
+    let generatedCOs = 0;
+    let pendingApprovals = 0;
+    let lowAttainmentCount = 0;
+
+    for (const course of myCourses) {
+      const courseCOs = cos[course.id] || [];
+      totalCOs += courseCOs.length;
+      if (courseCOs.length > 0) generatedCOs++;
+
+      const subs = submissions[course.id] || [];
+      pendingApprovals += subs.filter(s => s.status === "pending").length;
+
+      // Quick attainment check for low COs
+      const allMarks = subs.filter(s => s.status === "approved").flatMap(s => s.students);
+      if (allMarks.length > 0) {
+        const exams = examConfigs[course.id] || [];
+        const questions = exams.flatMap(e => e.questions);
+        const attainment = computeCOAttainmentFromMarks(allMarks, questions, thresholds.targetPassPct);
+        lowAttainmentCount += Object.values(attainment).filter(v => v.pct < thresholds.level3).length;
+      }
+    }
+
+    return { totalCOs, generatedCOs, pendingApprovals, lowAttainmentCount };
+  }, [myCourses, cos, submissions, examConfigs, thresholds]);
 
   return (
-    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="flex flex-col gap-16 pb-32 pt-4">
-
-      {/* ── HEADER ── */}
-      <motion.section variants={fadeSlideUp} className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 text-sm font-mono text-brand uppercase tracking-widest">
-          <span className="w-8 h-[1px] bg-brand" /> Faculty Hub
-        </div>
-        <div className="flex items-end justify-between flex-wrap gap-6">
+    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="flex flex-col gap-12 pb-32">
+      
+      {/* ── HEADER & AY SELECTOR ── */}
+      <motion.section variants={fadeSlideUp} className="flex justify-between items-end flex-wrap gap-6">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3 text-sm font-mono text-brand uppercase tracking-widest">
+            <span className="w-8 h-[1px] bg-brand" /> Faculty Portal
+          </div>
           <div>
             <h1 className="text-5xl font-display text-white">
-              Good morning, <span className="text-white/40">{user?.name?.split(" ")[0] ?? "Professor"}</span>
+              Welcome back, <span className="text-white/40">{user?.name?.split(" ")[0]}</span>
             </h1>
             <p className="text-white/40 font-light mt-3">
-              {MY_COURSES.length} courses assigned · AY {activeAY}
-              {isPastAY && <span className="ml-3 text-xs font-mono text-alert bg-alert/10 px-2 py-0.5 uppercase tracking-widest">Read-Only</span>}
+               Computer Science · Department of Engineering
             </p>
           </div>
-
-          {/* AY Selector (spec item) */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-mono text-white/30 uppercase tracking-widest">AY</span>
-            <div className="flex gap-2">
-              {AY_OPTIONS.map(ay => (
-                <button key={ay} onClick={() => { setActiveAY(ay); addToast(`Switched to Academic Year ${ay}`, 'info'); }}
-                  className={`px-4 py-2 text-xs font-mono uppercase tracking-widest transition-all border ${
-                    activeAY === ay ? "border-brand text-brand bg-brand/10" : "border-white/10 text-white/30 hover:text-white hover:border-white/30"
-                  }`}>
-                  {ay}
-                  {ay !== "2024-25" && <span className="ml-1.5 opacity-50">🔒</span>}
-                </button>
-              ))}
-            </div>
+        </div>
+        
+        <div className="flex items-center gap-4 bg-white/[0.03] border border-white/10 px-5 py-3 rounded-lg">
+          <Calendar className="w-4 h-4 text-brand" />
+          <div className="flex flex-col">
+            <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Academic Year</span>
+            <span className="text-sm font-display text-white">{ay.ay} {ay.status === 'locked' ? '🔒' : '●'}</span>
           </div>
+          <select className="bg-transparent border-none text-white/0 w-4 cursor-pointer outline-none">
+            <option value="24-25">2024-25</option>
+          </select>
         </div>
       </motion.section>
 
-      {/* ── PENDING ACTIONS (spec: action items panel) ── */}
-      {PENDING_ACTIONS.length > 0 && !isPastAY && (
-        <motion.section variants={fadeSlideUp}>
-          <h2 className="text-lg font-display text-white mb-6 flex items-center gap-3">
-            <AlertTriangle className="w-4 h-4 text-alert" />
-            Pending Actions
-            <span className="text-xs font-mono text-alert bg-alert/10 px-2 py-0.5">{PENDING_ACTIONS.length}</span>
+      {/* ── KEY METRICS (Spec: Page 2 Dashboard Components) ── */}
+      <motion.section variants={fadeSlideUp} className="grid md:grid-cols-4 gap-4">
+        <div className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
+          <div className="flex justify-between items-start mb-2">
+            <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">My Courses</p>
+            <Layers className="w-3.5 h-3.5 text-brand" />
+          </div>
+          <p className="text-2xl font-mono text-white">{myCourses.length}</p>
+        </div>
+        <div className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
+          <div className="flex justify-between items-start mb-2">
+            <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">CO Status</p>
+            <BookOpen className={`w-3.5 h-3.5 ${stats.generatedCOs < myCourses.length ? "text-alert" : "text-attain"}`} />
+          </div>
+          <p className="text-2xl font-mono text-white">{stats.generatedCOs}/{myCourses.length} <span className="text-[10px] text-white/20 font-light">Generated</span></p>
+        </div>
+        <div className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
+          <div className="flex justify-between items-start mb-2">
+            <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">Pending Appr.</p>
+            <Clock className={`w-3.5 h-3.5 ${stats.pendingApprovals > 0 ? "text-amber-400" : "text-white/20"}`} />
+          </div>
+          <p className="text-2xl font-mono text-white">{stats.pendingApprovals}</p>
+        </div>
+        <div className="p-6 border border-white/10 bg-alert/5 flex flex-col gap-1">
+          <div className="flex justify-between items-start mb-2">
+            <p className="text-[10px] font-mono text-alert/50 uppercase tracking-widest">Attainment Alerts</p>
+            <AlertTriangle className={`w-3.5 h-3.5 ${stats.lowAttainmentCount > 0 ? "text-alert" : "text-white/10"}`} />
+          </div>
+          <p className={`text-2xl font-mono ${stats.lowAttainmentCount > 0 ? "text-alert" : "text-white/20"}`}>{stats.lowAttainmentCount}</p>
+        </div>
+      </motion.section>
+
+      <div className="grid lg:grid-cols-3 gap-12">
+        
+        {/* ── COURSE LIST (Spec Component 1) ── */}
+        <div className="lg:col-span-2 flex flex-col gap-8">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-display text-white flex items-center gap-3">
+              <Layers className="w-4 h-4 text-brand" /> My Teaching Portfolio
+            </h2>
+          </div>
+          <div className="flex flex-col gap-4">
+            {myCourses.map(course => {
+              const courseCOs = cos[course.id] || [];
+              const subList = Array.isArray(submissions[course.id]) ? submissions[course.id] : [];
+              const hasPending = subList.some(s => s.status === "pending");
+              return (
+                <Link key={course.id} href={`/courses/${course.id}`} 
+                  className="p-8 border border-white/10 hover:border-white/20 transition-all bg-white/[0.01] hover:bg-white/[0.02] group flex items-center justify-between rounded-xl"
+                >
+                  <div className="flex items-center gap-6">
+                    <div className={`w-1.5 h-12 rounded-full ${courseCOs.length === 0 ? "bg-alert" : "bg-attain"}`} />
+                    <div>
+                      <div className="flex items-center gap-3 mb-1">
+                        <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest">{course.code}</p>
+                        {hasPending && <span className="text-[8px] font-mono bg-amber-400/10 text-amber-400 px-1.5 py-0.5 rounded border border-amber-400/20 uppercase">Awaiting Approval</span>}
+                      </div>
+                      <h3 className="text-xl font-display text-white group-hover:text-brand transition-colors">{course.name}</h3>
+                      <div className="flex items-center gap-4 mt-2">
+                        <span className="text-[10px] text-white/30 font-mono">Sem {course.semester}</span>
+                        <span className="w-1 h-1 rounded-full bg-white/10" />
+                        <span className="text-[10px] text-white/30 font-mono">{course.credits} Credits</span>
+                        <span className="w-1 h-1 rounded-full bg-white/10" />
+                        <span className="text-[10px] text-white/30 font-mono flex items-center gap-1">
+                          <BookOpen className="w-3 h-3" /> {courseCOs.length} COs
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-white/10 group-hover:text-white transition-colors" />
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── PENDING ACTIONS & QUICK LINKS (Spec Component 5) ── */}
+        <div className="flex flex-col gap-8">
+          <h2 className="text-lg font-display text-white flex items-center gap-3">
+            <Clock className="w-4 h-4 text-brand" /> Action Items
           </h2>
-          <div className="flex flex-col divide-y divide-white/5">
-            {PENDING_ACTIONS.map(action => (
-              <Link key={action.id} href={action.href}
-                className="flex items-center gap-6 py-5 group hover:pl-3 transition-all"
-              >
-                <span className={`w-2 h-2 rounded-full shrink-0 ${action.priority === "high" ? "bg-alert animate-pulse" : "bg-aurora"}`} />
-                <span className="text-white/70 text-sm font-light flex-1 group-hover:text-white transition-colors">{action.text}</span>
-                <ChevronRight className="w-4 h-4 text-white/20 group-hover:text-white/60 shrink-0 transition-colors" />
+          <div className="flex flex-col gap-4">
+            {myCourses.filter(c => (cos[c.id] || []).length === 0).map(c => (
+              <Link key={c.id} href={`/courses/${c.id}/generate-co`} className="p-5 border border-alert/20 bg-alert/5 flex items-center justify-between group rounded-lg">
+                <div className="flex items-center gap-4">
+                  <AlertCircle className="w-5 h-5 text-alert" />
+                  <div>
+                    <p className="text-xs text-white font-medium">COs Not Generated</p>
+                    <p className="text-[10px] text-white/40 font-mono mt-1">{c.code} · Action Required</p>
+                  </div>
+                </div>
+                <ArrowUpRight className="w-4 h-4 text-white/20 group-hover:text-alert transition-colors" />
               </Link>
             ))}
+            
+            {/* Quick Actions */}
+            <div className="mt-4 flex flex-col gap-3">
+              <h3 className="text-[10px] font-mono text-white/20 uppercase tracking-widest mb-1">Quick Workflows</h3>
+              <Link href="/courses/new" className="flex items-center gap-3 p-4 bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-colors rounded-lg text-sm">
+                <Plus className="w-4 h-4 text-brand" /> Create New Course
+              </Link>
+              <Link href="/notifications" className="flex items-center gap-3 p-4 bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-colors rounded-lg text-sm">
+                <CheckCircle2 className="w-4 h-4 text-attain" /> Review Deadlines
+              </Link>
+              <div onClick={() => window.open('/template.xlsx')} className="flex items-center gap-3 p-4 bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-colors rounded-lg text-sm cursor-pointer">
+                <FileSpreadsheet className="w-4 h-4 text-brand" /> Download Marks Template
+              </div>
+            </div>
+
+            {/* Notification Summary Widget */}
+            <div className="mt-8 p-6 bg-brand/5 border border-brand/20 rounded-xl">
+               <h3 className="text-xs font-display text-brand mb-4 flex items-center gap-2 uppercase tracking-widest">
+                 System Alerts
+               </h3>
+               <div className="space-y-4">
+                  <div className="flex gap-3">
+                    <div className="w-1 h-1 rounded-full bg-brand mt-1.5" />
+                    <p className="text-[11px] text-white/60 leading-relaxed">Admin has set the T2 marks deadline to **25th March 2026**.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-1 h-1 rounded-full bg-brand mt-1.5" />
+                    <p className="text-[11px] text-white/60 leading-relaxed">SY2024-25 Curriculum Gaps report has been published.</p>
+                  </div>
+               </div>
+            </div>
           </div>
-        </motion.section>
-      )}
+        </div>
 
-      {/* ── MY COURSES + CO STATUS + MARKS STATUS (spec items 1,2,3) ── */}
-      <motion.section variants={fadeSlideUp} className="flex flex-col gap-6">
-        <h2 className="text-lg font-display text-white">My Courses — AY {activeAY}</h2>
-        {MY_COURSES.map(course => {
-          const cos = COURSE_COS[course.id] || [];
-          const marksStatus = MARKS_STATUS[course.id] || {};
-          const gaps = getCurricularGaps(course.id);
-          const level1COs = cos.filter(c => getAttainmentLevel(c.pct).level === 1);
+      </div>
 
-          return (
-            <div key={course.id} className="border border-white/10 hover:border-white/20 transition-all group">
-              {/* Course header */}
-              <div className="flex items-center justify-between p-8 border-b border-white/5">
-                <div className="flex-1">
-                  <div className="flex items-center gap-4 mb-2">
-                    <span className="font-mono text-sm text-white/40">{course.code}</span>
-                    <span className="text-xs font-mono text-white/20">{course.dept} · Sem {course.semester}</span>
-                    {level1COs.length > 0 && (
-                      <span className="text-[10px] font-mono text-alert bg-alert/10 px-2 py-0.5 uppercase tracking-widest animate-pulse">
-                        ⚠ {level1COs.length} Level 1
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-xl font-display text-white group-hover:text-brand transition-colors">{course.name}</h3>
-                  <p className="text-sm text-white/40 font-light mt-2">{course.students} students enrolled</p>
-                </div>
-                <Link href={`/courses/${course.id}`}
-                  className="flex items-center gap-2 px-5 py-3 border border-white/10 text-white/40 text-xs font-mono uppercase tracking-widest hover:border-brand hover:text-brand transition-all"
-                >
-                  Open <ChevronRight className="w-3 h-3" />
-                </Link>
-              </div>
-
-              <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/5">
-                {/* CO Status (spec item 2) */}
-                <div className="p-6">
-                  <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-4">CO Status</p>
-                  <div className="flex items-center gap-6">
-                    <div className="text-center">
-                      <span className="text-3xl font-mono font-light text-attain">{course.cosGenerated}</span>
-                      <p className="text-[10px] font-mono text-white/30 uppercase mt-1">Generated</p>
-                    </div>
-                    {course.cosPending > 0 && (
-                      <div className="text-center">
-                        <span className="text-3xl font-mono font-light text-alert">{course.cosPending}</span>
-                        <p className="text-[10px] font-mono text-alert/60 uppercase mt-1">Pending</p>
-                      </div>
-                    )}
-                    {course.cosPending === 0 && (
-                      <span className="flex items-center gap-2 text-attain text-xs font-mono">
-                        <CheckCircle2 className="w-4 h-4" /> All COs complete
-                      </span>
-                    )}
-                  </div>
-                  {course.cosPending > 0 && (
-                    <Link href={`/courses/${course.id}/generate-co`}
-                      className="mt-4 inline-flex items-center gap-2 text-xs font-mono text-brand hover:text-white transition-colors"
-                    >
-                      Generate missing COs <ArrowRight className="w-3 h-3" />
-                    </Link>
-                  )}
-                </div>
-
-                {/* Marks Upload Status (spec item 3) */}
-                <div className="p-6">
-                  <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-4">Marks Upload Status</p>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(marksStatus).map(([exam, status]) => (
-                      <Link key={exam} href={`/courses/${course.id}/exams/${exam.toLowerCase()}/marks`}
-                        className={`px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-all hover:opacity-80 ${STATUS_COLOR[status]}`}
-                      >
-                        <span className="text-inherit">{exam}</span>
-                        <span className="ml-1.5 opacity-60">{status}</span>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* CO Attainment Quick-View (spec item 4) */}
-              {cos.length > 0 && (
-                <div className="p-6 border-t border-white/5">
-                  <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-4">Attainment Quick-View</p>
-                  <div className="flex items-end gap-3">
-                    {cos.map(c => {
-                      const level = getAttainmentLevel(c.pct);
-                      return (
-                        <div key={c.co} className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                          <div className="w-full bg-white/5 h-20 flex items-end relative rounded-sm overflow-hidden">
-                            <motion.div
-                              className={level.level === 1 ? "bg-alert w-full" : level.level === 2 ? "bg-brand w-full" : "bg-attain w-full"}
-                              initial={{ height: 0 }}
-                              animate={{ height: `${c.pct}%` }}
-                              transition={{ duration: 1, ease: "easeOut" }}
-                            />
-                          </div>
-                          <span className="text-[10px] font-mono text-white/40">{c.co}</span>
-                          <span className={`text-[10px] font-mono font-medium ${level.color}`}>{c.pct}%</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <Link href={`/courses/${course.id}/co-attainment`}
-                    className="mt-4 inline-flex items-center gap-2 text-xs font-mono text-white/40 hover:text-white transition-colors"
-                  >
-                    Full attainment report <ArrowRight className="w-3 h-3" />
-                  </Link>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </motion.section>
-
-      {/* ── QUICK ACTIONS ── */}
-      <motion.section variants={fadeSlideUp} className="grid md:grid-cols-3 gap-4">
-        {[
-          { href: "/courses/cs301/generate-co", icon: Target, label: "Generate COs", sub: "CS301" },
-          { href: "/courses/cs301/exams/t2/marks", icon: Upload, label: "Upload T2 Marks", sub: "CS301" },
-          { href: "/courses/cs301/co-attainment", icon: BarChart3, label: "View Attainment", sub: "CS301" },
-        ].map(({ href, icon: Icon, label, sub }) => (
-          <Link key={href} href={href}
-            className="flex items-center gap-5 p-6 border border-white/10 hover:border-brand hover:bg-brand/5 transition-all group"
-          >
-            <Icon className="w-5 h-5 text-white/30 group-hover:text-brand transition-colors shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-white group-hover:text-brand transition-colors">{label}</p>
-              <p className="text-xs font-mono text-white/30 mt-0.5">{sub}</p>
-            </div>
-            <ChevronRight className="w-4 h-4 text-white/20 group-hover:text-brand ml-auto transition-colors" />
-          </Link>
-        ))}
-      </motion.section>
     </motion.div>
   );
 }

@@ -1,161 +1,252 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  FileUp, Search, BrainCircuit, Sparkles, 
-  CheckCircle2, AlertCircle, ChevronLeft, 
-  Target, Award, Download, ArrowRight,
-  Info, Loader2, Link2
+  ChevronLeft, BrainCircuit, Sparkles, Plus, 
+  Trash2, Save, FileText, CheckCircle2, 
+  Target, Activity, ArrowRight, Zap, Info, AlertCircle
 } from "lucide-react";
 import Link from "next/link";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useDataStore, ExamQuestion } from "@/lib/dataStore";
+import { useAuthStore } from "@/lib/authStore";
 import { useUIStore } from "@/lib/uiStore";
+import { detectBloomsLevel, BLOOMS_LEVELS } from "@/lib/computations";
 
-// ─── MOCK DATA ───────────────────────────────────────────────────────────
-const QUESTIONS = [
-  { id: 1, text: "Explain the ACID properties of database transactions.", co: "CO4", bt: "L2 — Understand", confidence: 94 },
-  { id: 2, text: "Write a SQL query to find employees earning more than their managers.", co: "CO2", bt: "L3 — Apply", confidence: 88 },
-  { id: 3, text: "Design a B+ tree index structure for the given dataset.", co: "CO3", bt: "L4 — Analyze", confidence: 72 },
-];
+export default function QuestionMappingPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: courseId } = use(params);
+  const { addToast }      = useUIStore();
+  const { user }          = useAuthStore();
+  const courses           = useDataStore(s => s.courses);
+  const cos               = useDataStore(s => s.cos[courseId] || []);
+  const examConfigs       = useDataStore(s => s.examConfigs[courseId] || []);
+  const setQuestions    = useDataStore(s => s.setQuestions);
+  
+  const course = courses.find(c => c.id === courseId);
 
-export default function AIQuestionMapperPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [results, setResults] = useState<typeof QUESTIONS>([]);
-  const { addToast } = useUIStore();
+  // Analysis State
+  const [inputText, setInputText] = useState("");
+  const [analyzed, setAnalyzed]   = useState<{
+    bt: { code: string; name: string; verb: string };
+    co: string;
+    confidence: number;
+    reason: string;
+  } | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const handleBulkUpload = () => {
-    addToast("PDF received. Initiating NLP semantic extraction of questions...", "info");
-    setAnalyzing(true);
-    setTimeout(() => {
-      setAnalyzing(false);
-      setResults(QUESTIONS);
-    }, 2500);
+  // Buffer for addition
+  const [selectedExam, setSelectedExam] = useState(examConfigs[0]?.id || "");
+  const [qNo, setQNo]                   = useState("");
+  const [maxMarks, setMaxMarks]         = useState(5);
+
+  const handleAnalyze = async () => {
+    if (!inputText.trim()) return;
+    setIsAnalyzing(true);
+    setAnalyzed(null);
+    
+    // Simulate AI latency
+    await new Promise(r => setTimeout(r, 1200));
+    
+    const bt = detectBloomsLevel(inputText);
+    
+    // Simple mock CO suggestion logic based on keywords
+    let suggestedCO = cos[0]?.co || "CO1";
+    let reason = "Contextual relevance to specific outcomes.";
+    const lower = inputText.toLowerCase();
+    
+    if (lower.includes("map") || lower.includes("tree")) { suggestedCO = "CO2"; reason = "Topic matches Data Structures CO2"; }
+    else if (lower.includes("sql") || lower.includes("query")) { suggestedCO = "CO3"; reason = "Keywords match Database query outcomes"; }
+    
+    setAnalyzed({
+      bt,
+      co: suggestedCO,
+      confidence: 85 + Math.random() * 10,
+      reason
+    });
+    setIsAnalyzing(false);
+  };
+
+  const handleAddToPaper = () => {
+    if (!analyzed || !qNo || !selectedExam) {
+       addToast("Select an exam, enter Q No, and analyze first.", "warning");
+       return;
+    }
+    
+    const existingExam = examConfigs.find(e => e.id === selectedExam);
+    if (!existingExam) return;
+
+    const newQuestion: ExamQuestion = {
+      qno: qNo,
+      co: analyzed.co,
+      maxMarks: 10, // Default
+      bloomCode: analyzed.bt.code,
+      text: inputText
+    };
+
+    setQuestions(courseId, selectedExam, [...existingExam.questions, newQuestion]);
+    
+    addToast(`${qNo} added to ${existingExam.name} paper.`, "success");
+    setInputText("");
+    setAnalyzed(null);
+    setQNo("");
   };
 
   return (
-    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-6xl mx-auto pb-32">
+    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-[1200px] mx-auto pb-32">
       
-      {/* ── HEADER ── */}
-      <motion.div variants={fadeSlideUp} className="mb-12">
-        <Link href={`/courses/${id}/exams`} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors text-xs font-mono uppercase tracking-widest mb-8">
-          <ChevronLeft className="w-4 h-4" /> Back to Exams
+      {/* Header */}
+      <motion.div variants={fadeSlideUp} className="mb-10">
+        <Link href={`/courses/${courseId}`} className="flex items-center gap-2 text-white/30 hover:text-white transition-colors text-[10px] font-mono uppercase tracking-widest mb-4">
+          <ChevronLeft className="w-3.5 h-3.5" /> Back to Course
         </Link>
-        <div className="flex justify-between items-end">
-          <div>
-            <h1 className="text-4xl font-display text-white mb-2">AI Question Analyser</h1>
-            <p className="text-white/40 font-light italic">Bulk analysis of Bloom's levels and CO mapping</p>
-          </div>
-          <div className="flex gap-4">
-             <button 
-               onClick={handleBulkUpload}
-               className="px-8 py-3 bg-brand text-white font-mono text-[10px] uppercase tracking-widest hover:bg-brand/90 transition-all flex items-center gap-3"
-             >
-                <FileUp className="w-4 h-4" /> Upload Question Paper PDF
-             </button>
-          </div>
-        </div>
+        <h1 className="text-4xl font-display text-white mb-2 flex items-center gap-3">
+          <BrainCircuit className="w-8 h-8 text-brand" /> AI Question Analyser
+        </h1>
+        <p className="text-white/40 font-light italic">Paste your question paper content for automated Bloom's assessment and CO mapping.</p>
       </motion.div>
 
-      {/* ── ANALYSIS GRID (Spec: Faculty Page 5) ── */}
-      <div className="grid lg:grid-cols-3 gap-12">
+      <div className="grid lg:grid-cols-2 gap-12">
         
-        {/* Bulk Results Table */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
-           <h3 className="text-xs font-mono text-white/30 uppercase tracking-[0.2em] flex items-center gap-2">
-             <BrainCircuit className="w-4 h-4" /> Extraction Results
-           </h3>
+        {/* LEFT: Analysis Input */}
+        <div className="flex flex-col gap-6">
+          <div className="bg-white/[0.02] border border-white/10 rounded-2xl p-8 flex flex-col gap-6">
+             <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-mono text-white/40 uppercase tracking-widest flex items-center gap-2">
+                   <FileText className="w-3 h-3" /> Question Content
+                </label>
+                <textarea 
+                  value={inputText} onChange={e => setInputText(e.target.value)}
+                  placeholder="e.g. Discuss the various ACID properties of a transaction in DBMS with suitable examples."
+                  rows={8}
+                  className="bg-black/30 border border-white/10 p-5 text-white text-sm outline-none focus:border-brand/50 rounded-xl resize-none font-light leading-relaxed"
+                />
+             </div>
+             
+             <div className="flex items-center gap-4">
+                <button 
+                  onClick={handleAnalyze} disabled={isAnalyzing || !inputText.trim()}
+                  className="flex-1 bg-brand text-white py-4 rounded-xl flex items-center justify-center gap-3 hover:bg-brand/90 transition-all font-display text-sm disabled:opacity-30">
+                  {isAnalyzing ? <Zap className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  Analyse Question
+                </button>
+                <div className="px-5 py-4 border border-white/10 text-white/30 rounded-xl hover:bg-white/5 cursor-pointer transition-all">
+                  <FileText className="w-5 h-5" />
+                </div>
+             </div>
+          </div>
 
-           <div className="border border-white/10 overflow-hidden">
-             <table className="w-full text-left font-mono text-[10px]">
-               <thead className="bg-white/[0.03] border-b border-white/10">
-                 <tr>
-                   <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">Question Text</th>
-                   <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">Mapping</th>
-                   <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal text-right">Confidence</th>
-                 </tr>
-               </thead>
-               <tbody className="divide-y divide-white/5">
-                 {analyzing ? (
-                   <tr>
-                     <td colSpan={3} className="py-24 text-center">
-                        <Loader2 className="w-8 h-8 animate-spin text-brand mx-auto mb-4" />
-                        <p className="text-[10px] uppercase font-mono text-white/20 tracking-widest">AI Engine parsing PDF structure...</p>
-                     </td>
-                   </tr>
-                 ) : results.length === 0 ? (
-                   <tr>
-                     <td colSpan={3} className="py-24 text-center text-white/10 italic">
-                        No questions analyzed yet.
-                     </td>
-                   </tr>
-                 ) : (
-                   results.map((q, i) => (
-                     <tr key={i} className="hover:bg-white/[0.01] transition-colors group">
-                       <td className="px-6 py-6 text-white/50 italic leading-relaxed max-w-sm">"{q.text}"</td>
-                       <td className="px-6 py-6 font-mono">
-                          <div className="flex flex-col gap-1.5">
-                             <span className="text-brand flex items-center gap-1.5"><Target className="w-3 h-3" /> {q.co}</span>
-                             <span className="text-white/30 flex items-center gap-1.5"><Award className="w-3 h-3" /> {q.bt}</span>
-                          </div>
-                       </td>
-                       <td className="px-6 py-6 text-right">
-                          <div className="flex flex-col items-end gap-1">
-                             <span className={`text-xs ${q.confidence > 80 ? 'text-attain' : 'text-amber-500'}`}>{q.confidence}%</span>
-                             <div className="w-12 h-0.5 bg-white/5">
-                                <div className={`h-full ${q.confidence > 80 ? 'bg-attain' : 'bg-amber-500'}`} style={{ width: `${q.confidence}%` }} />
-                             </div>
-                          </div>
-                       </td>
-                     </tr>
-                   ))
-                 )}
-               </tbody>
-             </table>
-           </div>
-        </div>
+          <AnimatePresence>
+            {analyzed && (
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-brand/5 border border-brand/20 p-8 rounded-2xl flex flex-col gap-8 shadow-[0_0_50px_rgba(30,174,219,0.05)]">
+                
+                <h3 className="text-sm font-display text-brand flex items-center gap-2 uppercase tracking-widest">
+                  <Sparkles className="w-4 h-4" /> AI Diagnostics
+                </h3>
 
-        {/* Coverage Sidebar (Spec Page 5) */}
-        <div className="flex flex-col gap-8">
-           <div className="p-8 border border-white/10 bg-white/[0.02]">
-              <h3 className="text-sm font-display text-white mb-6 uppercase tracking-widest flex items-center gap-2">
-                <BarChart className="w-4 h-4 text-brand" /> CO Coverage
-              </h3>
-              <div className="flex flex-col gap-4">
-                 {["CO1", "CO2", "CO3", "CO4"].map(co => (
-                   <div key={co} className="flex flex-col gap-2">
-                      <div className="flex justify-between text-[10px] font-mono">
-                         <span className="text-white/40">{co} Coverage</span>
-                         <span className="text-white">{results.filter(r => r.co === co).length > 0 ? '25%' : '0%'}</span>
+                <div className="grid grid-cols-2 gap-8">
+                   <div className="flex flex-col gap-1">
+                      <p className="text-[9px] font-mono text-white/30 uppercase tracking-widest">Cognitive Level (BT)</p>
+                      <span className="text-xl text-white font-display border-b border-brand/30 pb-2">{analyzed.bt.code} — {analyzed.bt.name}</span>
+                      <p className="text-[10px] text-brand/60 font-mono mt-1 italic">Action Verb: "{analyzed.bt.verb}"</p>
+                   </div>
+                   <div className="flex flex-col gap-1">
+                      <p className="text-[9px] font-mono text-white/30 uppercase tracking-widest">Mapped Outcome (CO)</p>
+                      <span className="text-xl text-white font-display border-b border-brand/30 pb-2">{analyzed.co}</span>
+                      <p className="text-[10px] text-attain/60 font-mono mt-1 italic">{Math.floor(analyzed.confidence)}% Confidence</p>
+                   </div>
+                </div>
+
+                <div className="p-4 bg-black/20 rounded-lg flex gap-3 items-start border border-white/5">
+                   <Info className="w-4 h-4 text-white/20 mt-0.5" />
+                   <p className="text-[11px] text-white/40 leading-relaxed italic">{analyzed.reason}</p>
+                </div>
+
+                <div className="flex flex-col gap-4 border-t border-white/10 pt-8">
+                   <div className="grid grid-cols-2 gap-4">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Select Exam Paper</label>
+                        <select value={selectedExam} onChange={e => setSelectedExam(e.target.value)}
+                          className="bg-black/30 border border-white/10 p-3 text-white text-xs rounded outline-none focus:border-brand/40 transition-all">
+                          <option value="">Select Exam...</option>
+                          {examConfigs.map(ex => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+                        </select>
                       </div>
-                      <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                         <div className={`h-full bg-brand`} style={{ width: results.filter(r => r.co === co).length > 0 ? '25%' : '0%' }} />
+                      <div className="flex flex-col gap-2">
+                        <label className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Question No.</label>
+                        <input type="text" value={qNo} onChange={e => setQNo(e.target.value)}
+                           placeholder="Q1a"
+                           className="bg-black/30 border border-white/10 p-3 text-white text-xs rounded outline-none focus:border-brand/40" />
                       </div>
                    </div>
-                 ))}
-                 <div className="mt-4 p-4 bg-alert/5 border border-alert/10 flex gap-3 items-start">
-                    <AlertCircle className="w-4 h-4 text-alert shrink-0" />
-                    <p className="text-[9px] text-white/40 leading-relaxed font-mono italic">
-                      Warning: CO5 and CO6 have 0% coverage in this assessment.
-                    </p>
-                 </div>
-              </div>
-           </div>
+                   <button onClick={handleAddToPaper}
+                     className="w-full bg-white/5 border border-white/10 text-white hover:bg-white/10 py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-mono uppercase tracking-widest transition-all mt-2">
+                      <Plus className="w-4 h-4" /> Add to Exam Paper
+                   </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-           <div className="p-8 border border-white/5 bg-white/[0.01]">
-              <h3 className="text-[10px] font-mono text-white/20 uppercase tracking-widest mb-4">Heuristics</h3>
-              <p className="text-[10px] text-white/40 leading-relaxed font-mono">
-                AI uses keyword extraction vs Bloom's dictionary to predict mapping. Confidence scores reflect semantic proximity between question text and CO descriptors.
-              </p>
+        {/* RIGHT: Visual Context */}
+        <div className="flex flex-col gap-8">
+           <div className="p-8 border border-white/5 bg-white/[0.01] rounded-2xl h-full">
+              <h3 className="text-xs font-mono text-white/30 uppercase tracking-widest mb-8 flex items-center gap-3">
+                <Target className="w-4 h-4" /> Mapping Coverage Hub
+              </h3>
+              
+              <div className="space-y-12">
+                <div className="flex flex-col gap-4">
+                   <div className="flex justify-between items-end">
+                      <p className="text-sm text-white/60 font-light">Bloom's Distribution</p>
+                      <p className="text-[10px] font-mono text-white/20">Target: High cognitive (L4+)</p>
+                   </div>
+                   <div className="flex gap-1 h-3 rounded-full overflow-hidden bg-white/5">
+                      <div className="w-[30%] bg-brand" />
+                      <div className="w-[20%] bg-aurora" />
+                      <div className="w-[40%] bg-insight" />
+                      <div className="w-[10%] bg-alert" />
+                   </div>
+                   <div className="flex justify-between text-[9px] font-mono text-white/20 uppercase">
+                      <span>Remember</span>
+                      <span>Apply</span>
+                      <span>Analyse</span>
+                      <span>Create</span>
+                   </div>
+                </div>
+
+                <div className="flex flex-col gap-6">
+                   <p className="text-sm text-white/60 font-light underline decoration-brand/30 underline-offset-8">Outcome Correlation</p>
+                   <div className="space-y-4">
+                      {cos.slice(0, 4).map(co => (
+                        <div key={co.co} className="flex flex-col gap-1.5">
+                           <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-white/40">{co.co}</span>
+                              <span className="text-white/60">35% Coverage</span>
+                           </div>
+                           <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                              <motion.div initial={{ width: 0 }} animate={{ width: "35%" }} className="h-full bg-attain" />
+                           </div>
+                        </div>
+                      ))}
+                   </div>
+                </div>
+
+                <div className="mt-12 p-6 bg-amber-400/5 border border-amber-400/10 rounded-xl flex gap-4 items-start">
+                   <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+                   <div>
+                      <p className="text-xs text-amber-400 font-medium">Curricular Imbalance Detected</p>
+                      <p className="text-[10px] text-white/40 font-mono mt-1 leading-relaxed">CO4 and CO6 have 0% coverage in the active assessment set. Consider adding questions for these outcomes.</p>
+                   </div>
+                </div>
+              </div>
            </div>
         </div>
 
       </div>
+
     </motion.div>
   );
-}
-
-function BarChart({ className }: { className?: string }) {
-  return <path className={className} d="M12 20V10M18 20V4M6 20v-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />;
 }

@@ -21,6 +21,7 @@ const CHECKLIST = [
 
 export default function HODYearEndLockPage() {
   const { user } = useAuthStore();
+  const { addToast } = useUIStore();
   const [step, setStep] = useState(1);
   const [designation, setDesignation] = useState("");
   const [employeeId, setEmployeeId] = useState("");

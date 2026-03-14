@@ -1,217 +1,233 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Users, Search, UserPlus, FileUp, Edit3, Trash2, Shield, MoreVertical, XCircle, CheckCircle2 
+  Users, Search, Plus, Edit3, Trash2, Shield, 
+  CheckCircle2, X, Loader2, Mail, Building2, Phone
 } from "lucide-react";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useDataStore, UserRecord } from "@/lib/dataStore";
+import { useAuthStore, Role } from "@/lib/authStore";
 import { useUIStore } from "@/lib/uiStore";
 
-// ─── MOCK DATA ───
-const DEPARTMENTS = ["CSE", "ECE", "MECH", "CIVIL", "IT"];
-const ROLES = ["faculty", "subject_lead", "department_head", "admin"];
-
-const USERS_MOCK = [
-  { id: "FAC2024001", name: "Dr. Alan Smith", email: "asmith@univ.edu", dept: "CSE", role: "subject_lead", status: "active" },
-  { id: "FAC2024002", name: "Prof. Sarah Johnson", email: "sjohnson@univ.edu", dept: "ECE", role: "department_head", status: "active" },
-  { id: "FAC2024003", name: "Dr. Emily Chen", email: "echen@univ.edu", dept: "CSE", role: "faculty", status: "active" },
-  { id: "FAC2024004", name: "Mark Davis", email: "mdavis@univ.edu", dept: "MECH", role: "faculty", status: "inactive" },
-  { id: "SYSADMIN01", name: "System Admin", email: "admin@univ.edu", dept: "SYSTEM", role: "admin", status: "active" }
+const ROLE_OPTIONS: { value: Role; label: string; color: string }[] = [
+  { value: "admin",           label: "Admin",         color: "text-alert" },
+  { value: "department_head", label: "HOD",            color: "text-aurora" },
+  { value: "subject_lead",    label: "Course Lead",    color: "text-insight" },
+  { value: "faculty",         label: "Faculty",        color: "text-brand" },
+  { value: "student",         label: "Student",        color: "text-cyan-400" },
 ];
 
-export default function AdminUserManagementPage() {
-  const [search, setSearch] = useState("");
-  const [deptFilter, setDeptFilter] = useState("all");
-  const [roleFilter, setRoleFilter] = useState("all");
-  
-  const [isAdding, setIsAdding] = useState(false);
-  const [newUser, setNewUser] = useState({ id: "", name: "", email: "", dept: "CSE", role: "faculty" });
-  const { addToast } = useUIStore();
+const DEPTS = ["Administration", "CSE", "ECE", "MECH", "CIVIL", "IT", "MBA"];
 
-  const filteredUsers = USERS_MOCK.filter(u => 
-    (deptFilter === "all" || u.dept === deptFilter) &&
-    (roleFilter === "all" || u.role === roleFilter) &&
-    (u.name.toLowerCase().includes(search.toLowerCase()) || u.id.toLowerCase().includes(search.toLowerCase()))
-  );
+const BLANK_USER: {
+  name: string; email: string; password: string; employeeId: string;
+  roles: Role[]; dept: string; designation: string; status: "active" | "inactive"
+} = {
+  name: "", email: "", password: "", employeeId: "",
+  roles: ["faculty"] as Role[], dept: "CSE", designation: "", status: "active"
+};
+
+export default function AdminUsersPage() {
+  const users       = useDataStore(s => s.users);
+  const addUser     = useDataStore(s => s.addUser);
+  const updateUser  = useDataStore(s => s.updateUser);
+  const deleteUser  = useDataStore(s => s.deleteUser);
+  const { user: me } = useAuthStore();
+  const { addToast }  = useUIStore();
+
+  const [search, setSearch]         = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [showModal, setShowModal]   = useState(false);
+  const [editingId, setEditingId]   = useState<string | null>(null);
+  const [form, setForm]             = useState(BLANK_USER);
+  const [saving, setSaving]         = useState(false);
+
+  const filtered = useMemo(() =>
+    users.filter(u =>
+      (roleFilter === "all" || u.roles.includes(roleFilter as Role)) &&
+      (u.name.toLowerCase().includes(search.toLowerCase()) ||
+       u.email.toLowerCase().includes(search.toLowerCase()) ||
+       u.employeeId.toLowerCase().includes(search.toLowerCase()))
+    ), [users, search, roleFilter]);
+
+  const openCreate = () => { setForm(BLANK_USER); setEditingId(null); setShowModal(true); };
+  const openEdit   = (u: UserRecord) => {
+    setForm({ name: u.name, email: u.email, password: u.password, employeeId: u.employeeId, roles: u.roles, dept: u.dept, designation: u.designation, status: u.status as "active" | "inactive" });
+    setEditingId(u.id); setShowModal(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name || !form.email || !form.employeeId) {
+      addToast("Name, Email, and Employee ID are required.", "warning"); return;
+    }
+    setSaving(true);
+    await new Promise(r => setTimeout(r, 600));
+    if (editingId) {
+      updateUser(editingId, form);
+      addToast(`Profile updated: ${form.name}`, "success");
+    } else {
+      addUser(form);
+      addToast(`User provisioned: ${form.name} (${form.employeeId})`, "success");
+    }
+    setSaving(false);
+    setShowModal(false);
+  };
+
+  const handleDelete = (u: UserRecord) => {
+    if (u.id === me?.id) { addToast("Cannot delete your own account.", "warning"); return; }
+    deleteUser(u.id);
+    addToast(`User removed: ${u.name}`, "info");
+  };
+
+  const ROLE_META = Object.fromEntries(ROLE_OPTIONS.map(r => [r.value, r]));
 
   return (
     <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-7xl mx-auto pb-32">
       
       {/* ── HEADER ── */}
-      <motion.div variants={fadeSlideUp} className="mb-12 flex justify-between items-end flex-wrap gap-6">
+      <motion.div variants={fadeSlideUp} className="mb-10 flex justify-between items-end flex-wrap gap-6">
         <div>
-          <h1 className="text-4xl font-display text-white mb-2">User Provisioning</h1>
-          <p className="text-white/40 font-light italic">System-wide role-based access control and account lifecycle management</p>
+          <h1 className="text-4xl font-display text-white mb-2 flex items-center gap-4">
+            <Users className="w-8 h-8 text-brand" /> User Management
+          </h1>
+          <p className="text-white/40 font-light">{users.length} users registered &nbsp;·&nbsp; {users.filter(u => u.status === "active").length} active</p>
         </div>
-        <div className="flex gap-4">
-           <button 
-             onClick={() => addToast("Prepared system for CSV bulk import", "info")}
-             className="px-6 py-2.5 bg-white/[0.05] border border-white/10 text-white hover:bg-white/10 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
-             <FileUp className="w-3.5 h-3.5" /> CSV Bulk Import
-           </button>
-           <button onClick={() => setIsAdding(true)} className="px-6 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded shadow-[0_0_15px_rgba(30,174,219,0.3)]">
-             <UserPlus className="w-3.5 h-3.5" /> Provision User
-           </button>
-        </div>
-      </motion.div>
-
-      {/* ── METRICS ── */}
-      <motion.div variants={fadeSlideUp} className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-         <div className="bg-white/[0.02] border border-white/10 p-6 rounded-xl relative overflow-hidden">
-            <Shield className="w-24 h-24 text-white/[0.02] absolute -right-4 -bottom-4" />
-            <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1 relative z-10">Total Active Profiles</p>
-            <p className="text-3xl font-display text-white relative z-10">1,248</p>
-         </div>
-         <div className="bg-white/[0.02] border border-white/10 p-6 rounded-xl">
-            <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">Subject Leads</p>
-            <p className="text-3xl font-display text-aurora">45</p>
-         </div>
-         <div className="bg-white/[0.02] border border-white/10 p-6 rounded-xl">
-            <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest mb-1">Department Heads</p>
-            <p className="text-3xl font-display text-insight">12</p>
-         </div>
-         <div className="bg-white/[0.02] border border-white/10 p-6 rounded-xl">
-            <p className="text-[10px] font-mono text-alert uppercase tracking-widest mb-1">Pending Password Resets</p>
-            <p className="text-3xl font-display text-alert">3</p>
-         </div>
+        <button onClick={openCreate}
+          className="px-6 py-3 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/90 transition-colors flex items-center gap-2 rounded shadow-[0_0_15px_rgba(30,174,219,0.2)]">
+          <Plus className="w-4 h-4" /> Provision User
+        </button>
       </motion.div>
 
       {/* ── FILTERS ── */}
-      <motion.div variants={fadeSlideUp} className="mb-6 flex flex-wrap gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-lg">
-         <div className="flex-1 min-w-[250px] relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" />
-            <input 
-              type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search by name, ID, or email..."
-              className="w-full bg-cosmic border border-white/10 pl-10 pr-4 py-2 text-sm text-white outline-none focus:border-white/30 transition-colors rounded"
-            />
-         </div>
-         <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="bg-cosmic border border-white/10 px-4 py-2 text-sm text-white outline-none focus:border-white/30 transition-colors rounded">
-           <option value="all">All Departments</option>
-           {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-         </select>
-         <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="bg-cosmic border border-white/10 px-4 py-2 text-sm text-white outline-none focus:border-white/30 transition-colors rounded">
-           <option value="all">All Roles</option>
-           {ROLES.map(r => <option key={r} value={r}>{r.replace('_', ' ').toUpperCase()}</option>)}
-         </select>
+      <motion.div variants={fadeSlideUp} className="mb-6 flex gap-4 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, email or ID…"
+            className="w-full bg-white/5 border border-white/10 pl-10 pr-4 py-2.5 text-sm text-white outline-none focus:border-brand/50 transition-colors rounded font-mono" />
+        </div>
+        <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
+          className="bg-white/5 border border-white/10 px-4 py-2.5 text-sm text-white outline-none rounded uppercase tracking-widest text-[10px] font-mono">
+          <option value="all">All Roles</option>
+          {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
       </motion.div>
 
-      {/* ── USER DIRECTORY ── */}
-      <motion.div variants={fadeSlideUp} className="border border-white/10 bg-white/[0.01] overflow-hidden rounded-xl">
-         <table className="w-full text-left font-mono text-sm">
-           <thead className="bg-white/[0.03] border-b border-white/10">
-              <tr>
-                 <th className="px-6 py-4 text-white/30 uppercase tracking-widest text-[10px] font-normal">Identity</th>
-                 <th className="px-6 py-4 text-white/30 uppercase tracking-widest text-[10px] font-normal">Contact</th>
-                 <th className="px-6 py-4 text-white/30 uppercase tracking-widest text-[10px] font-normal">Department</th>
-                 <th className="px-6 py-4 text-white/30 uppercase tracking-widest text-[10px] font-normal">System Role</th>
-                 <th className="px-6 py-4 text-white/30 uppercase tracking-widest text-[10px] font-normal">Status</th>
-                 <th className="px-6 py-4 text-white/30 uppercase tracking-widest text-[10px] font-normal text-right">Actions</th>
+      {/* ── TABLE ── */}
+      <motion.div variants={fadeSlideUp} className="border border-white/10 bg-white/[0.01] rounded-xl overflow-hidden">
+        <table className="w-full text-left font-mono text-sm">
+          <thead className="bg-white/[0.03] border-b border-white/10">
+            <tr>
+              {["Employee ID", "Name", "Email", "Department", "Role", "Status", "Actions"].map(h => (
+                <th key={h} className="px-5 py-4 text-white/30 uppercase tracking-widest text-[10px] font-normal">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={7} className="py-20 text-center text-white/20 italic">No users match your search.</td></tr>
+            ) : filtered.map(u => (
+              <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
+                <td className="px-5 py-4 text-white/60">{u.employeeId}</td>
+                <td className="px-5 py-4 text-white font-medium">{u.name}</td>
+                <td className="px-5 py-4 text-white/50">{u.email}</td>
+                <td className="px-5 py-4 text-white/50">{u.dept}</td>
+                <td className="px-5 py-4">
+                  <div className="flex flex-wrap gap-1">
+                    {u.roles.map(r => {
+                      const m = ROLE_META[r];
+                      return <span key={r} className={`px-2 py-0.5 text-[8px] font-mono uppercase tracking-widest border rounded ${m?.color || ""} border-current/30 bg-current/5`}>{m?.label || r}</span>;
+                    })}
+                  </div>
+                </td>
+                <td className="px-5 py-4">
+                  <span className={`text-[9px] font-mono uppercase tracking-widest ${u.status === "active" ? "text-attain" : "text-white/30"}`}>
+                    {u.status}
+                  </span>
+                </td>
+                <td className="px-5 py-4">
+                  <div className="flex gap-2">
+                    <button onClick={() => openEdit(u)}
+                      className="p-1.5 hover:bg-white/10 rounded text-white/40 hover:text-white transition-colors">
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => handleDelete(u)}
+                      className="p-1.5 hover:bg-alert/10 rounded text-white/40 hover:text-alert transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => { updateUser(u.id, { status: u.status === "active" ? "inactive" : "active" }); addToast(`${u.name} — ${u.status === "active" ? "deactivated" : "reactivated"}`, "info"); }}
+                      className="p-1.5 hover:bg-white/10 rounded text-white/40 hover:text-white transition-colors" title="Toggle status">
+                      <Shield className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </td>
               </tr>
-           </thead>
-           <tbody className="divide-y divide-white/5">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                   <td colSpan={6} className="py-24 text-center text-white/20 italic">No user records found.</td>
-                </tr>
-              ) : (
-                filteredUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-white/[0.02] transition-colors group">
-                     <td className="px-6 py-6 font-light">
-                        <div className="flex flex-col gap-1">
-                           <span className="text-white font-medium">{user.name}</span>
-                           <span className="text-[10px] font-mono text-white/40">{user.id}</span>
-                        </div>
-                     </td>
-                     <td className="px-6 py-6 text-white/50">{user.email}</td>
-                     <td className="px-6 py-6 font-bold text-white/70">{user.dept}</td>
-                     <td className="px-6 py-6">
-                        <span className={`px-2.5 py-1 text-[9px] uppercase tracking-widest border rounded
-                           ${user.role === 'admin' ? 'border-brand/30 text-brand bg-brand/10' : 
-                             user.role === 'department_head' ? 'border-insight/30 text-insight bg-insight/10' :
-                             user.role === 'subject_lead' ? 'border-aurora/30 text-aurora bg-aurora/10' :
-                             'border-white/10 text-white/60 bg-white/5'}`}>
-                           {user.role.replace('_', ' ')}
-                        </span>
-                     </td>
-                     <td className="px-6 py-6">
-                        <div className="flex items-center gap-2">
-                           <span className={`w-2 h-2 rounded-full ${user.status === 'active' ? 'bg-attain shadow-[0_0_5px_#22c55e]' : 'bg-white/20'}`} />
-                           <span className="text-[10px] uppercase text-white/40">{user.status}</span>
-                        </div>
-                     </td>
-                     <td className="px-6 py-6 text-right relative">
-                        <button 
-                          onClick={() => addToast(`Opened management options for ${user.id}`, "info")}
-                          className="p-2 text-white/20 hover:text-white transition-colors opacity-0 group-hover:opacity-100">
-                           <MoreVertical className="w-4 h-4" />
-                        </button>
-                     </td>
-                  </tr>
-                ))
-              )}
-           </tbody>
-         </table>
+            ))}
+          </tbody>
+        </table>
       </motion.div>
 
-      {/* ── PROVISION MODAL ── */}
+      {/* ── MODAL: Create / Edit ── */}
       <AnimatePresence>
-         {isAdding && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-                  className="bg-cosmic border border-white/10 p-8 w-full max-w-lg shadow-2xl relative rounded-xl"
-               >
-                  <button onClick={() => setIsAdding(false)} className="absolute top-4 right-4 text-white/20 hover:text-white transition-colors"><XCircle className="w-5 h-5" /></button>
-                  <div className="flex items-center gap-3 mb-2">
-                     <span className="p-2 bg-brand/10 rounded text-brand"><UserPlus className="w-5 h-5" /></span>
-                     <h3 className="text-xl font-display text-white">Provision Identity Record</h3>
+        {showModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-8">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
+              className="w-full max-w-lg bg-[#0a0a0f] border border-white/10 rounded-xl p-8 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-xl font-display text-white">{editingId ? "Edit User" : "Provision New User"}</h3>
+                <button onClick={() => setShowModal(false)} className="text-white/40 hover:text-white transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+                {([
+                  ["Full Name",     "name",        "text",     "Dr. Firstname Lastname"],
+                  ["Email",         "email",       "email",    "user@nexus.edu"],
+                  ["Employee / Roll ID", "employeeId", "text", "FAC2024001"],
+                  ["Password",      "password",    "password", "Secure@Pass1"],
+                  ["Designation",   "designation", "text",     "Assistant Professor"],
+                ] as [string, string, string, string][]).map(([label, key, type, ph]) => (
+                  <div key={key} className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-mono text-white/40 uppercase tracking-widest">{label}</label>
+                    <input type={type} placeholder={ph} value={(form as any)[key]}
+                      onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
+                      className="bg-black/30 border border-white/10 px-4 py-2.5 text-white text-sm outline-none focus:border-brand/50 transition-colors rounded" />
                   </div>
-                  <p className="text-sm font-light text-white/40 mb-8 italic indent-12">Create a new authenticated user profile and assign permission boundaries.</p>
-                  
-                  <div className="grid grid-cols-2 gap-6 font-mono text-sm">
-                     <div className="col-span-2 flex flex-col gap-2">
-                        <label className="text-[10px] text-white/30 uppercase tracking-widest">Employee ID</label>
-                        <input type="text" value={newUser.id} onChange={e => setNewUser(n => ({ ...n, id: e.target.value }))} placeholder="e.g. FAC2024005" className="bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded" />
-                     </div>
-                     <div className="col-span-2 flex flex-col gap-2">
-                        <label className="text-[10px] text-white/30 uppercase tracking-widest">Full Legal Name</label>
-                        <input type="text" value={newUser.name} onChange={e => setNewUser(n => ({ ...n, name: e.target.value }))} className="bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded" />
-                     </div>
-                     <div className="col-span-2 flex flex-col gap-2">
-                        <label className="text-[10px] text-white/30 uppercase tracking-widest">Institutional Email</label>
-                        <input type="email" value={newUser.email} onChange={e => setNewUser(n => ({ ...n, email: e.target.value }))} className="bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded" />
-                     </div>
-                     <div className="flex flex-col gap-2">
-                        <label className="text-[10px] text-white/30 uppercase tracking-widest">Department</label>
-                        <select value={newUser.dept} onChange={e => setNewUser(n => ({ ...n, dept: e.target.value }))} className="bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded">
-                           {DEPARTMENTS.map(d => <option key={d} value={d} className="bg-cosmic">{d}</option>)}
-                        </select>
-                     </div>
-                     <div className="flex flex-col gap-2">
-                        <label className="text-[10px] text-white/30 uppercase tracking-widest">System Role</label>
-                        <select value={newUser.role} onChange={e => setNewUser(n => ({ ...n, role: e.target.value }))} className="bg-white/5 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded">
-                           {ROLES.map(r => <option key={r} value={r} className="bg-cosmic">{r.replace('_', ' ').toUpperCase()}</option>)}
-                        </select>
-                     </div>
-                  </div>
-
-                  <div className="mt-8 pt-6 border-t border-white/10 flex justify-end gap-4">
-                     <button onClick={() => setIsAdding(false)} className="px-6 py-2 text-white/40 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">Cancel</button>
-                     <button 
-                        onClick={() => {
-                           setIsAdding(false);
-                           addToast(`Provisioned new ${newUser.role.replace('_', ' ')} profile for ${newUser.name || newUser.id || 'User'}`, "success");
-                        }} 
-                        className="px-8 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/80 transition-colors flex items-center gap-2 rounded">
-                        <CheckCircle2 className="w-4 h-4" /> Create Profile
-                     </button>
-                  </div>
-               </motion.div>
-            </div>
-         )}
+                ))}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Department</label>
+                  <select value={form.dept} onChange={e => setForm(p => ({ ...p, dept: e.target.value }))}
+                    className="bg-black/30 border border-white/10 px-4 py-2.5 text-white text-sm outline-none rounded">
+                    {DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Role</label>
+                  <select value={form.roles[0]} onChange={e => setForm(p => ({ ...p, roles: [e.target.value as Role] }))}
+                    className="bg-black/30 border border-white/10 px-4 py-2.5 text-white text-sm outline-none rounded">
+                    {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={() => setShowModal(false)}
+                    className="flex-1 px-4 py-2.5 border border-white/10 text-white/50 hover:text-white hover:border-white/30 transition-colors text-[10px] font-mono uppercase tracking-widest rounded">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={saving}
+                    className="flex-1 px-4 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50 rounded">
+                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                    {editingId ? "Save Changes" : "Create User"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
-
     </motion.div>
   );
 }

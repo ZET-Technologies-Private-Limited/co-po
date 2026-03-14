@@ -1,142 +1,131 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { fadeSlideUp, staggerContainer } from "@/lib/animations";
-import { Calendar, Save, CheckCircle2, Clock, ShieldAlert, ArrowRight, Copy } from "lucide-react";
 import { useState } from "react";
+import { motion } from "framer-motion";
+import { CalendarClock, Save, Lock, Copy, AlertCircle, CheckCircle2 } from "lucide-react";
+import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useDataStore } from "@/lib/dataStore";
+import { useAuthStore } from "@/lib/authStore";
 import { useUIStore } from "@/lib/uiStore";
 
 export default function AcademicYearConfigPage() {
-  const [activeTab, setActiveTab] = useState("current");
-  const { addToast } = useUIStore();
+  const { user }      = useAuthStore();
+  const { addToast }  = useUIStore();
+  const ay            = useDataStore(s => s.ay);
+  const setAY         = useDataStore(s => s.setAY);
+  const lockAY        = useDataStore(s => s.lockAY);
+  const addAuditEntry = useDataStore(s => s.addAuditEntry);
+
+  const [local, setLocal]         = useState({ ...ay });
+  const [confirmLock, setConfLock] = useState(false);
+
+  const hasChanges =
+    local.startDate !== ay.startDate ||
+    local.endDate   !== ay.endDate   ||
+    local.marksDeadline  !== ay.marksDeadline ||
+    local.coLockDeadline !== ay.coLockDeadline ||
+    local.poDeadline     !== ay.poDeadline;
+
+  const handleSave = () => {
+    setAY(local);
+    addAuditEntry({
+      type: "system", userId: user?.id || "admin", role: "admin",
+      action: `AY ${local.ay} configuration updated — marks deadline: ${local.marksDeadline}, CO lock: ${local.coLockDeadline}`,
+      ip: "127.0.0.1"
+    });
+    addToast(`Academic Year ${local.ay} configuration saved.`, "success");
+  };
+
+  const handleLock = () => {
+    if (!confirmLock) { setConfLock(true); addToast("Click **Confirm Lock** again to permanently lock this AY.", "warning"); return; }
+    lockAY(user?.id || "admin");
+    setConfLock(false);
+    addToast(`Academic Year ${ay.ay} has been locked and archived. All data is now read-only.`, "success");
+  };
+
+  const handleClone = () => {
+    const [year1, year2] = ay.ay.split("-").map(Number);
+    const nextAY = `${year1 + 1}-${String(year2 + 1).slice(-2)}`;
+    setAY({ ay: nextAY, status: "active", startDate: "", endDate: "", marksDeadline: "", coLockDeadline: "", poDeadline: "" });
+    setLocal({ ay: nextAY, status: "active", startDate: "", endDate: "", marksDeadline: "", coLockDeadline: "", poDeadline: "" });
+    addToast(`New AY ${nextAY} cloned and set as active. Configure dates and save.`, "info");
+  };
+
+  const isLocked = ay.status === "locked" || ay.status === "archived";
+
+  const fields: [string, keyof typeof local, string][] = [
+    ["AY Start Date",        "startDate",       "First day of the academic year"],
+    ["AY End Date",          "endDate",         "Last day of the academic year"],
+    ["Marks Submission Deadline", "marksDeadline", "Faculty must submit all marks by this date"],
+    ["CO Lock Deadline",    "coLockDeadline",   "All COs must be finalized and locked by this date"],
+    ["PO Report Deadline",  "poDeadline",       "PO/PSO attainment reports must be filed by this date"],
+  ];
 
   return (
-    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-6xl mx-auto pb-32">
+    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-3xl mx-auto pb-32">
       
-      {/* ── HEADER ── */}
       <motion.div variants={fadeSlideUp} className="mb-12 flex justify-between items-end flex-wrap gap-6">
         <div>
-           <div className="flex items-center gap-2 mb-2 font-mono text-[10px] uppercase tracking-widest text-brand">
-             <Calendar className="w-3.5 h-3.5" /> Core Infrastructure
-           </div>
-          <h1 className="text-4xl font-display text-white mb-2">Academic Year Master</h1>
-          <p className="text-white/40 font-light italic">Configure global timelines, deadlines, and regulation alignment.</p>
+          <h1 className="text-4xl font-display text-white mb-2 flex items-center gap-4">
+            <CalendarClock className="w-8 h-8 text-brand" /> Academic Year Config
+          </h1>
+          <div className="flex items-center gap-3 mt-2">
+            <span className="text-xl font-display text-white/60">{ay.ay}</span>
+            <span className={`px-2.5 py-1 text-[9px] font-mono uppercase tracking-widest border rounded ${
+              ay.status === "active"   ? "border-attain/30 text-attain bg-attain/10" :
+              ay.status === "locked"   ? "border-alert/30 text-alert bg-alert/10" :
+              "border-white/20 text-white/40"
+            }`}>{ay.status}</span>
+          </div>
         </div>
-        <div className="flex gap-4">
-           <button 
-             onClick={() => addToast("Academic Year configuration saved successfully", "success")}
-             className="px-6 py-2.5 bg-brand text-white hover:bg-brand/90 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
-             <Save className="w-3.5 h-3.5" /> Save Configuration
-           </button>
+        <div className="flex gap-3">
+          <button onClick={handleClone}
+            className="px-5 py-2.5 border border-white/10 text-white/60 hover:text-white hover:border-white/30 text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 transition-colors rounded">
+            <Copy className="w-3.5 h-3.5" /> Clone to Next AY
+          </button>
+          <button onClick={handleSave} disabled={!hasChanges || isLocked}
+            className="px-5 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/90 transition-colors flex items-center gap-2 disabled:opacity-40 rounded shadow-[0_0_15px_rgba(30,174,219,0.2)]">
+            <Save className="w-3.5 h-3.5" /> Save Config
+          </button>
+          <button onClick={handleLock} disabled={isLocked}
+            className={`px-5 py-2.5 text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 transition-colors rounded disabled:opacity-40 ${
+              confirmLock ? "bg-alert text-white hover:bg-alert/90" : "border border-alert/30 text-alert hover:bg-alert/10"
+            }`}>
+            <Lock className="w-3.5 h-3.5" /> {confirmLock ? "Confirm Lock" : "Lock & Archive AY"}
+          </button>
         </div>
       </motion.div>
 
-      <div className="grid lg:grid-cols-3 gap-8">
-         <motion.div variants={fadeSlideUp} className="lg:col-span-2 flex flex-col gap-6">
-            
-            {/* ── ACTIVE CONFIGURATION ── */}
-            <div className="bg-white/[0.02] border border-white/10 rounded-xl p-8">
-               <div className="flex items-center justify-between mb-8 border-b border-white/10 pb-4">
-                  <h2 className="text-lg font-display text-white">Current Session: 2024-25</h2>
-                  <span className="px-3 py-1 bg-attain/20 border border-attain/30 text-attain text-[10px] font-mono uppercase tracking-widest rounded-full flex items-center gap-1.5">
-                     <span className="w-1.5 h-1.5 rounded-full bg-attain animate-pulse" /> Active
-                  </span>
-               </div>
-               
-               <div className="grid grid-cols-2 gap-8 font-mono text-sm mb-8">
-                  <div className="flex flex-col gap-2">
-                     <label className="text-[10px] text-white/30 uppercase tracking-widest">Start Date</label>
-                     <input type="date" defaultValue="2024-07-01" className="bg-black/50 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded" />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                     <label className="text-[10px] text-white/30 uppercase tracking-widest">End Date (Expected)</label>
-                     <input type="date" defaultValue="2025-06-30" className="bg-black/50 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded" />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                     <label className="text-[10px] text-white/30 uppercase tracking-widest">Applicable Regulation</label>
-                     <select className="bg-black/50 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded">
-                        <option>R21 Framework</option>
-                        <option>R18 Framework</option>
-                     </select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                     <label className="text-[10px] text-white/30 uppercase tracking-widest">Default PO Set</label>
-                     <select className="bg-black/50 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand transition-colors rounded">
-                        <option>NBA Tier-II (12 POs)</option>
-                     </select>
-                  </div>
-               </div>
-               
-               <h3 className="text-xs font-mono text-white/50 uppercase tracking-widest mb-4 border-b border-white/5 pb-2">Global Deadlines (Odd Semester)</h3>
-               <div className="grid grid-cols-3 gap-4 mb-4">
-                  <div className="p-4 border border-white/5 bg-black/20 rounded">
-                     <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-2 flex items-center gap-2"><Clock className="w-3 h-3" /> T1 Marks Upload</p>
-                     <input type="date" defaultValue="2024-09-15" className="w-full bg-transparent border-b border-white/10 py-1 text-white text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="p-4 border border-white/5 bg-black/20 rounded">
-                     <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-2 flex items-center gap-2"><Clock className="w-3 h-3" /> T2 Marks Upload</p>
-                     <input type="date" defaultValue="2024-11-20" className="w-full bg-transparent border-b border-white/10 py-1 text-white text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-                  <div className="p-4 border border-white/5 bg-black/20 rounded">
-                     <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-2 flex items-center gap-2"><Clock className="w-3 h-3" /> SEE Marks Upload</p>
-                     <input type="date" defaultValue="2024-12-15" className="w-full bg-transparent border-b border-white/10 py-1 text-white text-sm outline-none focus:border-brand transition-colors" />
-                  </div>
-               </div>
-               <p className="text-[10px] font-mono text-amber-500/70 italic flex items-center gap-2 mt-4 px-2">
-                 <ShieldAlert className="w-3 h-3" /> Reminders are sent to Faculty 3 days and 1 day prior to deadlines.
-               </p>
-            </div>
+      {isLocked && (
+        <motion.div variants={fadeSlideUp} className="mb-8 p-4 bg-alert/5 border border-alert/20 flex items-center gap-3 rounded-lg">
+          <AlertCircle className="w-5 h-5 text-alert shrink-0" />
+          <p className="text-sm text-white/60 font-light">This Academic Year is <strong className="text-alert">locked</strong>. All configuration and data is now read-only.</p>
+        </motion.div>
+      )}
 
-            {/* ── ROLLOVER / COPY SETTINGS ── */}
-            <div className="bg-white/[0.02] border border-white/10 rounded-xl p-8 flex items-start gap-6">
-               <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center shrink-0">
-                  <Copy className="w-5 h-5 text-white/40" />
-               </div>
-               <div>
-                  <h3 className="text-lg font-display text-white mb-2">Import Previous Definitions</h3>
-                  <p className="text-white/40 font-light text-sm mb-6">Clone Course-Faculty assignments, CO-PO mappings, and Department alignments from a locked Academic Year to accelerate initialization.</p>
-                  <button 
-                    onClick={() => addToast("Cloned settings from 2023-24 successfully", "success")}
-                    className="px-6 py-2.5 border border-white/20 text-white hover:bg-white/5 transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 rounded">
-                    Clone from 2023-24 <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-               </div>
-            </div>
-         </motion.div>
-
-         {/* ── STATE MANAGEMENT RIGHT PANEL ── */}
-         <motion.div variants={fadeSlideUp} className="flex flex-col gap-6">
-            <div className="bg-alert/5 border border-alert/20 rounded-xl p-8">
-               <h3 className="text-lg font-display text-alert mb-2 flex items-center gap-2">
-                 <ShieldAlert className="w-5 h-5" /> Year-End Lock
-               </h3>
-               <p className="text-alert/60 font-light text-sm mb-8 leading-relaxed">
-                 Initiating a Year-End Lock will instantly freeze all academic operations, marks entries, and calculations for 2024-25. 
-                 This action requires full HOD digital sign-off across all departments and is irreversable via the standard UI.
-               </p>
-               <button 
-                 onClick={() => addToast("Year-End Lock initiated. Awaiting HOD sign-offs.", "warning")}
-                 className="w-full py-3 bg-alert/20 text-alert border border-alert/50 text-[10px] font-mono uppercase tracking-widest rounded hover:bg-alert hover:text-white transition-colors text-center">
-                 Initiate Lock Sequence
-               </button>
-            </div>
-
-            <div className="bg-white/[0.02] border border-white/10 rounded-xl p-8">
-               <h3 className="text-sm font-mono text-white/30 uppercase tracking-widest mb-6">Historical Sessions</h3>
-               <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between p-3 border border-white/5 bg-black/30 rounded">
-                     <span className="font-mono text-sm text-white/60">2023-24</span>
-                     <span className="text-[9px] font-mono uppercase tracking-widest text-alert border border-alert/30 px-2 py-0.5 rounded">Locked</span>
-                  </div>
-                  <div className="flex items-center justify-between p-3 border border-white/5 bg-black/30 rounded">
-                     <span className="font-mono text-sm text-white/60">2022-23</span>
-                     <span className="text-[9px] font-mono uppercase tracking-widest text-white/20 border border-white/10 px-2 py-0.5 rounded">Archived</span>
-                  </div>
-               </div>
-            </div>
-         </motion.div>
+      <div className="flex flex-col gap-5">
+        {fields.map(([label, key, desc]) => (
+          <motion.div key={key} variants={fadeSlideUp} className="border border-white/10 bg-white/[0.02] rounded-lg p-6">
+            <label className="text-xs font-mono text-white/40 uppercase tracking-widest flex items-center gap-2 mb-1">
+              <CalendarClock className="w-3 h-3" /> {label}
+            </label>
+            <p className="text-[10px] text-white/25 font-light mb-3">{desc}</p>
+            <input
+              type="date"
+              value={local[key]}
+              disabled={isLocked}
+              onChange={e => setLocal(p => ({ ...p, [key]: e.target.value }))}
+              className="bg-black/30 border border-white/10 px-4 py-2.5 text-white text-sm outline-none focus:border-brand/50 transition-colors rounded disabled:opacity-40 disabled:cursor-not-allowed"
+            />
+          </motion.div>
+        ))}
       </div>
 
+      {hasChanges && !isLocked && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6 flex items-center gap-3 text-amber-400 text-xs font-mono">
+          <AlertCircle className="w-4 h-4 shrink-0" /> Unsaved changes — click Save Config to persist.
+        </motion.div>
+      )}
     </motion.div>
   );
 }

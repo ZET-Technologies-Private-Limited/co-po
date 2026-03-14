@@ -1,193 +1,209 @@
 "use client";
 
+import { useMemo } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { 
-  BookOpen, ChartBar, CheckCircle2, XCircle, ChevronRight, 
-  ArrowRight, Award, History, TrendingUp, Clock
+  BookOpen, CheckCircle2, XCircle, ChevronRight, 
+  Calendar, Target, Activity, Clock
 } from "lucide-react";
 import { useAuthStore } from "@/lib/authStore";
+import { useDataStore, ExamQuestion, StudentMark } from "@/lib/dataStore";
+import { computeCOAttainmentFromMarks } from "@/lib/computations";
 import { staggerContainer, fadeSlideUp } from "@/lib/animations";
 
-// ─── MOCK STUDENT DATA (Spec-aligned) ───────────────────────────────────
-const ENROLLED_COURSES = [
-  { 
-    id: "cs301", code: "CS301", name: "Database Management Systems", 
-    faculty: "Prof. Anita Nair",
-    cos: [
-      { id: "CO1", status: "attained", score: 85 },
-      { id: "CO2", status: "attained", score: 72 },
-      { id: "CO3", status: "not_attained", score: 45 },
-      { id: "CO4", status: "pending", score: 0 },
-      { id: "CO5", status: "pending", score: 0 },
-    ]
-  },
-  { 
-    id: "cs302", code: "CS302", name: "Design & Analysis of Algorithms", 
-    faculty: "Dr. Ramesh Iyer",
-    cos: [
-      { id: "CO1", status: "attained", score: 90 },
-      { id: "CO2", status: "attained", score: 65 },
-      { id: "CO3", status: "attained", score: 62 },
-      { id: "CO4", status: "not_attained", score: 38 },
-    ]
-  }
-];
-
-const RECENT_MARKS = [
-  { course: "CS301", exam: "T1", score: 18, max: 20, pct: 90 },
-  { course: "CS302", exam: "T1", score: 14, max: 20, pct: 70 },
-  { course: "CS301", exam: "T2", score: 12, max: 20, pct: 60 },
-];
-
 export function StudentDashboardView() {
-  const { user } = useAuthStore();
+  const { user }         = useAuthStore();
+  const courses          = useDataStore(s => s.courses);
+  const submissions      = useDataStore(s => s.submissions);
+  const examConfigs      = useDataStore(s => s.examConfigs);
+  const cosMap           = useDataStore(s => s.cos);
+  const ay               = useDataStore(s => s.ay);
+
+  // Filter courses where student is enrolled
+  const myEnrolledCourses = useMemo(() => {
+    return courses.filter(c => c.studentRolls?.includes(user?.employeeId || ""));
+  }, [courses, user]);
+
+  // Compute stats for the specific student
+  const studentStats = useMemo(() => {
+    let totalAttainmentSum = 0;
+    let coCount = 0;
+    let attainedCount = 0;
+    const summaries: any[] = [];
+
+    for (const course of myEnrolledCourses) {
+      const allSubmissions = submissions[course.id] || [];
+      const approved = allSubmissions.filter(s => s.status === "approved");
+      
+      // Get only THIS student's marks from all approved exams
+      const myMarks: StudentMark[] = approved.map(sub => {
+        return sub.students.find((s: StudentMark) => s.roll === user?.employeeId);
+      }).filter((m): m is StudentMark => !!m);
+
+      const allExams: any[] = examConfigs[course.id] || [];
+      const questions = allExams.flatMap((e: any) => e.questions);
+      const attainment = computeCOAttainmentFromMarks(myMarks, questions, 60);
+
+      const courseCOs = cosMap[course.id] || [];
+      const coSummary = courseCOs.map(co => {
+        const data = attainment[co.co] || { pct: 0 };
+        const val = data.pct;
+        coCount++;
+        totalAttainmentSum += val;
+        if (val >= 60) attainedCount++;
+        return { id: co.co, score: val, status: val >= 60 ? "attained" : val > 0 ? "not_attained" : "pending" };
+      });
+
+      summaries.push({
+        ...course,
+        cos: coSummary
+      });
+    }
+
+    const avg = coCount > 0 ? totalAttainmentSum / coCount : 0;
+    return { avg, attainedCount, coCount, summaries };
+  }, [myEnrolledCourses, submissions, examConfigs, cosMap, user]);
 
   return (
-    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="flex flex-col gap-16 pb-32">
+    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="flex flex-col gap-12 pb-32">
       
       {/* ── HEADER ── */}
-      <motion.section variants={fadeSlideUp} className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 text-sm font-mono text-cyan-400 uppercase tracking-widest">
-          <span className="w-8 h-[1px] bg-cyan-400" /> Student Portal
+      <motion.section variants={fadeSlideUp} className="flex justify-between items-end flex-wrap gap-6">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3 text-sm font-mono text-cyan-400 uppercase tracking-widest">
+            <span className="w-8 h-[1px] bg-cyan-400" /> Student Persona
+          </div>
+          <div>
+            <h1 className="text-5xl font-display text-white">
+              Hi, <span className="text-white/40">{user?.name?.split(" ")[0]}</span>
+            </h1>
+            <p className="text-white/40 font-light mt-3">
+              {user?.employeeId} · Year III · Computer Science & Engineering
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-5xl font-display text-white">
-            Hello, <span className="text-white/40">{user?.name?.split(" ")[0]}</span>
-          </h1>
-          <p className="text-white/40 font-light mt-3">
-            {user?.employeeId} · {user?.designation} · Computer Science & Engineering
-          </p>
+        <div className="flex items-center gap-4 bg-white/[0.03] border border-white/10 px-5 py-3 rounded-lg">
+          <Calendar className="w-4 h-4 text-cyan-400" />
+          <div className="flex flex-col">
+            <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest">Enrollment Status</span>
+            <span className="text-sm font-display text-white">AY {ay.ay} · {myEnrolledCourses.length} Courses</span>
+          </div>
         </div>
       </motion.section>
 
-      {/* ── STATS OVERVIEW ── */}
+      {/* ── KEY METRICS ── */}
       <motion.section variants={fadeSlideUp} className="grid md:grid-cols-3 gap-4">
-        <div className="p-6 border border-white/10 bg-white/[0.02]">
+        <div className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
           <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-1">Average Attainment</p>
-          <p className="text-3xl font-mono text-cyan-400">76.4<span className="text-sm opacity-50 ml-1">%</span></p>
+          <p className="text-3xl font-mono text-cyan-400">{studentStats.avg.toFixed(1)}<span className="text-sm opacity-50 ml-1">%</span></p>
         </div>
-        <div className="p-6 border border-white/10 bg-white/[0.02]">
-          <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-1">COs Attained</p>
-          <p className="text-3xl font-mono text-attain">12<span className="text-sm opacity-50 text-white/20 ml-1">/ 15</span></p>
+        <div className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
+          <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-1">COs Achieved</p>
+          <p className="text-3xl font-mono text-attain">{studentStats.attainedCount}<span className="text-sm opacity-50 text-white/20 ml-1">/ {studentStats.coCount}</span></p>
         </div>
-        <div className="p-6 border border-white/10 bg-white/[0.02]">
-          <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-1">Current Ranking</p>
-          <p className="text-3xl font-mono text-white/60">Top 15<span className="text-sm opacity-50 ml-1">%</span></p>
+        <div className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
+          <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-1">Syllabus Progress</p>
+          <p className="text-3xl font-mono text-white/60">Stage 4<span className="text-sm opacity-50 ml-1">/ 5</span></p>
         </div>
       </motion.section>
 
-      <div className="grid lg:grid-cols-2 gap-16">
+      <div className="grid lg:grid-cols-2 gap-12">
         
-        {/* ── MY COURSES (Spec: My courses this semester widget) ── */}
-        <motion.section variants={fadeSlideUp} className="flex flex-col gap-8">
+        {/* ── COURSE ENROLLMENTS ── */}
+        <div className="flex flex-col gap-8">
           <h2 className="text-lg font-display text-white flex items-center gap-3">
-            <BookOpen className="w-4 h-4 text-cyan-400" /> My Courses
+            <BookOpen className="w-4 h-4 text-cyan-400" /> Academic Portfolio
           </h2>
           <div className="flex flex-col gap-4">
-            {ENROLLED_COURSES.map(course => (
-              <div key={course.id} className="p-8 border border-white/10 hover:border-cyan-400/30 transition-all group relative overflow-hidden">
+            {studentStats.summaries.map(course => (
+              <div key={course.id} className="p-8 border border-white/10 hover:border-cyan-400/30 transition-all group relative overflow-hidden bg-white/[0.01]">
                 <div className="flex justify-between items-start mb-6">
                   <div>
-                    <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-1">{course.code}</p>
+                    <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest mb-1">{course.code}</p>
                     <h3 className="text-xl font-display text-white group-hover:text-cyan-400 transition-colors uppercase pr-8 tracking-tight">{course.name}</h3>
-                    <p className="text-sm text-white/40 font-light mt-1 italic">{course.faculty}</p>
+                    <p className="text-[10px] text-white/40 font-mono mt-1 uppercase tracking-tighter">Credits: {course.credits}.0 · Dept: {course.dept}</p>
                   </div>
-                  <Link href={`/student/course/${course.id}/co-attainment`} className="text-white/20 group-hover:text-white transition-colors">
+                  <Link href={`/student/course/${course.id}/co-attainment`} className="text-white/10 group-hover:text-cyan-400 transition-colors">
                     <ChevronRight className="w-5 h-5" />
                   </Link>
                 </div>
 
-                {/* CO Icons (Spec: mini status icons) */}
                 <div className="flex gap-2">
-                  {course.cos.map(co => (
+                  {course.cos.map((co: any) => (
                     <div key={co.id} className="flex flex-col items-center gap-1.5">
-                      <div className={`p-1.5 rounded-sm ${
-                        co.status === "attained" ? "bg-attain/10 text-attain" : 
-                        co.status === "not_attained" ? "bg-alert/10 text-alert" : 
-                        "bg-white/5 text-white/20"
+                      <div className={`p-1.5 rounded-sm border ${
+                        co.status === "attained" ? "bg-attain/10 border-attain/20 text-attain" : 
+                        co.status === "not_attained" ? "bg-alert/10 border-alert/20 text-alert" : 
+                        "bg-white/5 border-white/10 text-white/10"
                       }`}>
                         {co.status === "attained" ? <CheckCircle2 className="w-3.5 h-3.5" /> : 
                          co.status === "not_attained" ? <XCircle className="w-3.5 h-3.5" /> : 
                          <Clock className="w-3.5 h-3.5" />}
                       </div>
-                      <span className="text-[9px] font-mono text-white/30">{co.id}</span>
+                      <span className="text-[9px] font-mono text-white/20">{co.id}</span>
                     </div>
                   ))}
                 </div>
               </div>
             ))}
+            {studentStats.summaries.length === 0 && (
+              <div className="p-16 border border-dashed border-white/10 text-center rounded-2xl text-white/20 font-mono text-xs uppercase tracking-widest">
+                No active enrollments for {ay.ay}
+              </div>
+            )}
           </div>
-        </motion.section>
+        </div>
 
-        {/* ── MY MARKS (Spec: My marks summary widget) ── */}
-        <motion.section variants={fadeSlideUp} className="flex flex-col gap-8">
-          <h2 className="text-lg font-display text-white flex items-center gap-3">
-            <TrendingUp className="w-4 h-4 text-cyan-400" /> Result Summary
-          </h2>
-          <div className="border border-white/10 overflow-hidden">
-            <table className="w-full text-left font-mono text-xs">
-              <thead className="bg-white/[0.03] border-b border-white/10">
-                <tr>
-                  <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">Exam</th>
-                  <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">Score</th>
-                  <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal font-bold">Percentage</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {RECENT_MARKS.map((mark, i) => (
-                  <tr key={i} className="hover:bg-white/[0.02] transition-colors group">
-                    <td className="px-6 py-5">
-                      <p className="text-white/70">{mark.course}</p>
-                      <p className="text-[10px] text-white/20 mt-0.5">{mark.exam}</p>
-                    </td>
-                    <td className="px-6 py-5">
-                      <span className="text-white">{mark.score}</span>
-                      <span className="text-white/20"> / {mark.max}</span>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
-                          <div className="h-full bg-cyan-400/50" style={{ width: `${mark.pct}%` }} />
-                        </div>
-                        <span className="text-cyan-400">{mark.pct}%</span>
+        {/* ── FOCUS AREAS & ANALYTICS ── */}
+        <div className="flex flex-col gap-10">
+           <div className="flex flex-col gap-8">
+              <h2 className="text-lg font-display text-white flex items-center gap-3">
+                <Target className="w-4 h-4 text-cyan-400" /> Intelligence Insights
+              </h2>
+              <div className="p-8 border border-alert/20 bg-alert/[0.02] rounded-2xl">
+                <h3 className="text-[10px] font-mono text-alert mb-5 flex items-center gap-2 uppercase tracking-widest">
+                  <Activity className="w-4 h-4" /> Focus Deficits
+                </h3>
+                <div className="flex flex-col gap-6">
+                   <div className="flex gap-4 items-start">
+                      <div className="w-1.5 h-1.5 rounded-full bg-alert mt-1.5 shrink-0" />
+                      <div>
+                         <p className="text-xs text-white/80 font-medium">Cognitive Gap in CO3 (DBMS)</p>
+                         <p className="text-[10px] text-white/30 mt-1 leading-relaxed">Your performance in SQL Optimization questions suggests a need for extra practice in Query Plan analysis.</p>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="p-6 bg-white/[0.01] flex justify-center">
-              <Link href="/student/marks" className="text-[10px] font-mono uppercase tracking-widest text-white/40 hover:text-white transition-colors flex items-center gap-2">
-                View All Results <ArrowRight className="w-3 h-3" />
-              </Link>
-            </div>
-          </div>
+                   </div>
+                   <div className="flex gap-4 items-start">
+                      <div className="w-1.5 h-1.5 rounded-full bg-alert mt-1.5 shrink-0" />
+                      <div>
+                         <p className="text-xs text-white/80 font-medium">L3 Application Skill (Algorithms)</p>
+                         <p className="text-[10px] text-white/30 mt-1 leading-relaxed">CO4 attainment is currently below 40%. Remedial tutorial on Greedy Strategies recommended.</p>
+                      </div>
+                   </div>
+                </div>
+              </div>
+           </div>
 
-          {/* AREAS TO IMPROVE (Spec widget) */}
-          <div className="p-8 border border-alert/20 bg-alert/[0.02]">
-            <h3 className="text-sm font-display text-alert mb-4 flex items-center gap-2 uppercase tracking-widest">
-              <History className="w-4 h-4" /> Focus Areas
-            </h3>
-            <ul className="flex flex-col gap-3">
-              <li className="flex gap-3 items-start">
-                <span className="w-1.5 h-1.5 rounded-full bg-alert mt-1.5" />
-                <div>
-                  <p className="text-xs text-white/70">Join Performance (CS301 CO3)</p>
-                  <p className="text-[10px] text-white/30 mt-0.5">Focus on Hash Joins and Indexing strategies.</p>
-                </div>
-              </li>
-              <li className="flex gap-3 items-start">
-                <span className="w-1.5 h-1.5 rounded-full bg-alert mt-1.5" />
-                <div>
-                  <p className="text-xs text-white/70">Dynamic Programming (CS302 CO4)</p>
-                  <p className="text-[10px] text-white/30 mt-0.5">Revise memoization vs tabulation.</p>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </motion.section>
+           <div className="p-8 bg-white/[0.01] border border-white/10 rounded-2xl">
+              <h3 className="text-[10px] font-mono text-white/40 mb-6 uppercase tracking-widest">Cumulative Growth</h3>
+              <div className="space-y-6">
+                 {['Knowledge', 'Analysis', 'Ethics', 'Design'].map(skill => (
+                   <div key={skill} className="flex flex-col gap-2">
+                     <div className="flex justify-between text-[10px] font-mono text-white/30 uppercase">
+                        <span>{skill}</span>
+                        <span>{Math.floor(Math.random()*30 + 60)}%</span>
+                     </div>
+                     <div className="h-0.5 bg-white/5 rounded-full overflow-hidden">
+                        <div className="h-full bg-cyan-400" style={{ width: `${Math.random()*30 + 60}%` }} />
+                     </div>
+                   </div>
+                 ))}
+              </div>
+           </div>
+        </div>
+
       </div>
+
     </motion.div>
   );
 }

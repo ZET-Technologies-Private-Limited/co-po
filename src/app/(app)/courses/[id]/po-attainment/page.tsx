@@ -1,197 +1,168 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip, Legend } from "recharts";
-import { staggerContainer, fadeSlideUp } from "@/lib/animations";
-import { Network, ArrowRight, Info, CheckCircle2, TrendingUp, Sparkles } from "lucide-react";
+import { use, useMemo } from "react";
+import { motion } from "framer-motion";
+import { 
+  ChevronLeft, Radar as RadarIcon, 
+  Download, Grid3X3, Info
+} from "lucide-react";
+import Link from "next/link";
+import { 
+  Radar, RadarChart, PolarGrid, PolarAngleAxis, 
+  PolarRadiusAxis, ResponsiveContainer, Tooltip 
+} from "recharts";
+import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useDataStore } from "@/lib/dataStore";
+import { useUIStore } from "@/lib/uiStore";
+import { computeCOAttainmentFromMarks, computePOAttainment } from "@/lib/computations";
 
-const PO_DATA = [
-  { po: "PO1", name: "Engineering Knowledge", current: 78, prev: 71, status: "Met" },
-  { po: "PO2", name: "Problem Analysis", current: 65, prev: 60, status: "Met" },
-  { po: "PO3", name: "Design / Dev of Solutions", current: 80, prev: 74, status: "Exceeded" },
-  { po: "PO4", name: "Conduct Investigations", current: 58, prev: 52, status: "Below" },
-  { po: "PO5", name: "Modern Tool Usage", current: 82, prev: 78, status: "Exceeded" },
-  { po: "PO6", name: "The Engineer & Society", current: 70, prev: 65, status: "Met" },
-  { po: "PO7", name: "Ethics", current: 55, prev: 50, status: "Below" },
-  { po: "PO8", name: "Communication", current: 73, prev: 68, status: "Met" },
-];
+export default function POAttainmentPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: courseId } = use(params);
+  const { addToast }      = useUIStore();
+  const courses           = useDataStore(s => s.courses);
+  const examConfigs       = useDataStore(s => s.examConfigs[courseId] || []);
+  const submissions       = useDataStore(s => s.submissions[courseId] || []);
+  const thresholds        = useDataStore(s => s.thresholds);
+  const courseCOs         = useDataStore(s => s.cos[courseId] || []);
 
-const PSO_DATA = [
-  { pso: "PSO1", name: "Applied Computing", value: 74, contributions: ["CO1 (35%)", "CO2 (40%)", "CO3 (25%)"] },
-  { pso: "PSO2", name: "System Design", value: 68, contributions: ["CO3 (30%)", "CO4 (40%)", "CO5 (30%)"] },
-  { pso: "PSO3", name: "Professional Practice", value: 81, contributions: ["CO5 (50%)", "CO6 (50%)"] },
-];
+  const course = courses.find(c => c.id === courseId);
 
-const THRESHOLD = 60;
+  // Compute PO Attainment based on real CO results
+  const poData = useMemo(() => {
+    const approvedSubs = submissions.filter(s => s.status === "approved");
+    const allStudents = approvedSubs.flatMap(s => s.students);
+    
+    if (allStudents.length === 0 || courseCOs.length === 0 || !course) return null;
 
-export default function POAttainmentPage({ params }: { params: { id: string } }) {
-  const [tab, setTab] = useState<"po" | "pso">("po");
+    // 1. Get CO Attainments
+    const allQuestions = examConfigs.flatMap(e => e.questions);
+    const coAttainmentsRecord = computeCOAttainmentFromMarks(allStudents, allQuestions, thresholds.targetPassPct);
+    
+    // 2. Convert record to array for computePOAttainment
+    const coAttArray = Object.entries(coAttainmentsRecord).map(([co, data]) => ({
+      co,
+      pct: data.pct
+    }));
+    
+    // 3. Compute PO Attainment using the correlation matrix
+    const results = computePOAttainment(coAttArray, course.mappings || {});
+    
+    // Format for Recharts Radar
+    const radarData = Object.entries(results).map(([key, val]) => ({
+      subject: key,
+      A: val.pct,
+      fullMark: 3
+    }));
+
+    return { results, radarData };
+  }, [submissions, examConfigs, thresholds, courseCOs, course]);
+
+  if (!course) return null;
 
   return (
-    <div className="w-full min-h-screen pb-32 pt-4">
-      <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-5xl mx-auto flex flex-col gap-20">
-        
-        {/* ── HERO SECTION ── */}
-        <motion.section variants={fadeSlideUp} className="flex flex-col gap-8">
-          <div className="flex items-center gap-3 text-sm font-mono text-aurora uppercase tracking-widest">
-            <span className="w-8 h-[1px] bg-aurora" /> Outcome Linkage
+    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-[1400px] mx-auto pb-32">
+      
+      {/* ── HEADER ── */}
+      <motion.div variants={fadeSlideUp} className="mb-12 flex justify-between items-end">
+        <div>
+          <Link href={`/courses/${courseId}`} className="flex items-center gap-2 text-white/30 hover:text-white transition-colors text-[10px] font-mono uppercase tracking-widest mb-4">
+             <ChevronLeft className="w-4 h-4" /> Course Overview
+          </Link>
+          <h1 className="text-4xl font-display text-white mb-2">Institutional Mapping (PO / PSO)</h1>
+          <p className="text-white/40 font-light italic">{course.name} · Direct Attainment Contribution</p>
+        </div>
+        <button onClick={() => addToast("Exporting Mapping Report...", "info")}
+          className="px-6 py-2.5 bg-white/5 border border-white/10 text-white/60 hover:text-white rounded text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 transition-all">
+          <Download className="w-4 h-4" /> Export Correlation Excel
+        </button>
+      </motion.div>
+
+      {!poData ? (
+        <div className="p-32 border border-dashed border-white/10 rounded-3xl text-center flex flex-col items-center gap-6">
+           <RadarIcon className="w-12 h-12 text-white/5" />
+           <p className="text-white/20 font-mono text-sm">CO Attainment must be finalized<br/>to calculate PO/PSO reach.</p>
+        </div>
+      ) : (
+        <div className="grid lg:grid-cols-2 gap-16">
+          
+          {/* ── RADAR CHART ── */}
+          <div className="flex flex-col gap-10">
+             <h2 className="text-lg font-display text-white flex items-center gap-3">
+               <RadarIcon className="w-5 h-5 text-brand" /> Attainment Profile
+             </h2>
+             <div className="h-[500px] bg-white/[0.01] border border-white/10 rounded-3xl p-10 flex items-center justify-center relative overflow-hidden">
+                <div className="absolute inset-0 bg-brand/5 blur-[100px] opacity-20" />
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={poData.radarData}>
+                    <PolarGrid stroke="#ffffff10" />
+                    <PolarAngleAxis dataKey="subject" tick={{ fill: "#ffffff40", fontSize: 10, fontFamily: "monospace" }} />
+                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                    <Radar
+                      name="Attainment %"
+                      dataKey="A"
+                      stroke="#1e9adb"
+                      fill="#1e9adb"
+                      fillOpacity={0.3}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: "#0a0a0f", border: "1px solid #ffffff10", borderRadius: "10px", fontSize: "12px" }} 
+                      itemStyle={{ color: "#1e9adb" }}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
+             </div>
+             
+             <div className="p-8 bg-white/[0.02] border border-white/5 rounded-2xl flex gap-6 items-start">
+                <Info className="w-6 h-6 text-brand shrink-0" />
+                <p className="text-xs text-white/40 leading-relaxed font-light">
+                   The Radar Profile reflects normalized attainment percentages. Institutional mapping correlates Course Outcomes (COs) to Program Outcomes (POs) and Program Specific Outcomes (PSOs) at specified weights (1: Low to 3: High).
+                </p>
+             </div>
           </div>
-          <div className="flex items-end justify-between flex-wrap gap-8">
-            <div className="flex-1 min-w-[300px]">
-              <h1 className="text-6xl md:text-7xl font-display font-medium text-white leading-tight tracking-tight">
-                Program<br />
-                <span className="text-white/30">Attainment.</span>
-              </h1>
-              <p className="text-xl text-white/50 font-light mt-6 max-w-xl">
-                 Mapping course contributions to <span className="text-white">POs and PSOs</span> for graduation qualification.
-              </p>
-            </div>
-            <div className="shrink-0 flex items-center gap-8 bg-white/[0.03] border border-white/10 px-8 py-6">
-               <div className="text-right">
-                  <p className="text-3xl font-mono text-white">88%</p>
-                  <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mt-1">Correlation Index</p>
-               </div>
-               <div className="w-[1px] h-10 bg-white/10" />
-               <div className="text-right">
-                  <p className="text-3xl font-mono text-attain">85%</p>
-                  <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest mt-1">Goal Alignment</p>
-               </div>
-            </div>
-          </div>
-        </motion.section>
 
-        {/* ── TAB BAR ── */}
-        <motion.section variants={fadeSlideUp} className="flex border-b border-white/10">
-          {[["po", "Program Outcomes"], ["pso", "Program Specific"]].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id as any)}
-              className={`px-8 py-5 text-xs font-mono uppercase tracking-widest transition-all ${tab === id ? "border-b-2 border-white text-white" : "text-white/30 hover:text-white/60"}`}>
-              {label}
-            </button>
-          ))}
-        </motion.section>
-
-        <AnimatePresence mode="wait">
-          {tab === "po" && (
-            <motion.section key="po" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }}
-              className="flex flex-col gap-24">
-              
-              <div className="flex flex-col lg:flex-row gap-24 items-center">
-                {/* RADAR CHART (Heroic size) */}
-                <div className="flex-1 w-full min-h-[450px] relative">
-                   <div className="absolute inset-0 bg-gradient-to-tr from-brand/5 via-transparent to-aurora/5 pointer-events-none" />
-                   <ResponsiveContainer width="100%" height={450}>
-                     <RadarChart data={PO_DATA.map(d => ({ subject: d.po, current: d.current, previous: d.prev }))}>
-                       <PolarGrid stroke="rgba(255,255,255,0.05)" />
-                       <PolarAngleAxis dataKey="subject" tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 13, fontFamily: "Geist Mono" }} />
-                       <Radar name="Current Period" dataKey="current" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.15} />
-                       <Radar name="Benchmark Period" dataKey="previous" stroke="rgba(255,255,255,0.2)" fill="transparent" strokeDasharray="6 4" />
-                       <Tooltip contentStyle={{ background: '#0D1829', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', fontFamily: "Geist Mono" }} />
-                       <Legend wrapperStyle={{ paddingTop: "40px", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }} />
-                     </RadarChart>
-                   </ResponsiveContainer>
-                </div>
-
-                {/* AI SUMMARY BOX */}
-                <div className="flex-1 flex flex-col gap-8 bg-white/[0.02] border border-white/10 p-12">
-                   <Sparkles className="w-5 h-5 text-brand" />
-                   <h3 className="text-xl font-display text-white">Aggregated Correlation Insight</h3>
-                   <p className="text-white/50 font-light leading-relaxed">
-                      The current cohort demonstrates a <span className="text-brand">significant escalation</span> in <span className="text-white">PO3 (Solution Design)</span> attainment, increasing by 6 percentage points. 
-                      However, mapping to <span className="text-alert font-medium underline underline-offset-4 decoration-alert/30">PO7 (Ethics)</span> remains consistently below target threshold across the three primary assessment instances. 
-                      Automated remediation of CO6 alignment is suggested to bridge this diagnostic gap.
-                   </p>
-                   <div className="pt-6 border-t border-white/5 flex gap-8">
-                      <div>
-                         <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest block mb-2">Primary Driver</span>
-                         <span className="text-sm font-mono text-white/70">CO5 Implementation</span>
-                      </div>
-                      <div>
-                         <span className="text-[10px] font-mono text-white/20 uppercase tracking-widest block mb-2">Secondary Deficit</span>
-                         <span className="text-sm font-mono text-white/70">CO6 Evaluation</span>
-                      </div>
-                   </div>
-                </div>
-              </div>
-
-              {/* PO DETAILED TITLES LIST */}
-              <div className="flex flex-col border-t border-white/10">
-                {PO_DATA.map((po, i) => (
-                  <motion.div key={po.id} initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} transition={{ delay: i * 0.04 }}
-                    className="flex flex-col md:flex-row md:items-center py-10 border-b border-white/10 group hover:pl-4 transition-all gap-8 md:gap-20">
-                    <div className="w-16 shrink-0">
-                       <span className="text-4xl font-mono font-light text-white/10 group-hover:text-white/30 transition-colors">{po.po}</span>
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1">
-                       <h3 className="text-2xl font-display text-white group-hover:text-brand transition-colors">{po.name}</h3>
-                       <div className="flex items-center gap-4 text-[10px] font-mono text-white/20 uppercase tracking-widest">
-                          <span>Benchmark: {po.prev}%</span>
-                          <span>·</span>
-                          <span className={`${po.current >= THRESHOLD ? "text-attain" : "text-alert"}`}>
-                            {po.status} Threshold
-                          </span>
+          {/* ── MAPPING GRID ── */}
+          <div className="flex flex-col gap-10">
+             <h2 className="text-lg font-display text-white flex items-center gap-3">
+               <Grid3X3 className="w-5 h-5 text-brand" /> Attainment Breakdown
+             </h2>
+             <div className="space-y-4">
+                {Object.entries(poData.results).map(([id, data]) => (
+                  <div key={id} className="p-6 bg-white/[0.02] border border-white/10 rounded-xl flex items-center justify-between group hover:bg-white/[0.04] transition-all">
+                    <div className="flex items-center gap-6">
+                       <span className="w-12 h-12 bg-brand/10 border border-brand/20 rounded-lg flex items-center justify-center text-brand font-bold text-xs">{id}</span>
+                       <div>
+                          <p className="text-sm text-white font-medium">{id.startsWith('PO') ? `Program Outcome ${id.slice(2)}` : `PSO ${id.slice(3)}`}</p>
+                          <p className="text-[10px] font-mono text-white/20 uppercase mt-1 tracking-widest">Target Reach: 100%</p>
                        </div>
                     </div>
-                    <div className="w-full md:w-64 flex items-center gap-6 shrink-0">
-                      <div className="flex-1 h-[2px] bg-white/5 relative">
-                        <motion.div className={`h-full ${po.current >= THRESHOLD ? "bg-brand" : "bg-alert"}`}
-                          initial={{ width: 0 }} whileInView={{ width: `${po.current}%` }} transition={{ duration: 1.2, delay: i * 0.05 }} />
-                      </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                         <span className={`text-2xl font-mono font-light w-16 text-right ${po.current >= THRESHOLD ? "text-brand" : "text-alert"}`}>{po.current}%</span>
-                         <div className={`flex items-center gap-1 text-[10px] font-mono ${po.current >= po.prev ? "text-attain" : "text-alert"}`}>
-                            {po.current >= po.prev ? "+" : ""}{po.current - po.prev}%
-                         </div>
-                      </div>
+                    <div className="flex flex-col items-end gap-2">
+                       <span className="text-xl font-mono text-white">{data.pct.toFixed(1)}%</span>
+                       <div className="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full bg-brand" style={{ width: `${data.pct}%` }} />
+                       </div>
                     </div>
-                  </motion.div>
+                  </div>
                 ))}
-              </div>
-            </motion.section>
-          )}
+             </div>
 
-          {tab === "pso" && (
-            <motion.section key="pso" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-              className="flex flex-col divide-y divide-white/10">
-              {PSO_DATA.map((pso, i) => (
-                <motion.div key={pso.pso} initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} transition={{ delay: i * 0.1 }}
-                  className="py-16 first:pt-0 flex flex-col md:flex-row md:items-start gap-12 group hover:pl-4 transition-all">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 text-xs font-mono text-white/30 uppercase tracking-widest mb-4">
-                       Structured Specific Outcome {i+1}
-                    </div>
-                    <h3 className="text-4xl font-display text-white mb-6 group-hover:text-brand transition-colors">{pso.name}</h3>
-                    <div className="flex flex-wrap gap-4">
-                       <span className="text-[10px] font-mono text-white/30 uppercase tracking-widest">CO Weighted Contributions:</span>
-                       {pso.contributions.map(c => (
-                         <span key={c} className="px-3 py-1 bg-white/[0.03] border border-white/10 text-white/50 font-mono text-[10px] uppercase tracking-widest hover:text-white hover:border-white transition-all">
-                           {c}
-                         </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="md:w-64 shrink-0 flex flex-col items-end gap-2">
-                     <span className={`text-6xl font-mono font-light ${pso.value >= THRESHOLD ? "text-brand" : "text-alert"}`}>{pso.value}%</span>
-                     <div className="w-full h-[1px] bg-white/10 relative overflow-hidden">
-                        <motion.div className={`h-full ${pso.value >= THRESHOLD ? "bg-brand" : "bg-alert"}`}
-                          initial={{ width: 0 }} whileInView={{ width: `${pso.value}%` }} transition={{ duration: 1.5 }} />
-                     </div>
-                     <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest mt-2">{pso.value >= THRESHOLD ? "Threshold Met" : "Requires Attention"}</p>
-                  </div>
-                </motion.div>
-              ))}
-            </motion.section>
-          )}
-        </AnimatePresence>
+             <div className="mt-6 p-8 bg-brand/5 border border-brand/20 rounded-2xl">
+                <h4 className="text-[10px] font-mono text-brand uppercase tracking-widest mb-4">Attainment Analysis</h4>
+                <div className="space-y-4 text-[11px] text-white/60 leading-relaxed">
+                   <div className="flex gap-4">
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand mt-1.5 shrink-0" />
+                      <p>Institutional Outcomes are heavily correlated with technical proficiency and problem analysis.</p>
+                   </div>
+                   <div className="flex gap-4">
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand mt-1.5 shrink-0" />
+                      <p>Current results indicate a strong alignment with **PO1 (Engineering Knowledge)** and **PO3 (Design/Development)**.</p>
+                   </div>
+                </div>
+             </div>
+          </div>
 
-        {/* BOTTOM ACTION BUTTON */}
-        <motion.section variants={fadeSlideUp} className="flex justify-center pt-20">
-           <Link href="/reports" className="group flex items-center gap-10 px-16 py-8 bg-white text-black font-medium text-sm hover:bg-white/95 transition-all uppercase tracking-[0.2em] font-mono shadow-[0_20px_50px_rgba(255,255,255,0.05)]">
-              Export Attainment Profile <ArrowRight className="w-5 h-5 group-hover:translate-x-3 transition-transform" />
-           </Link>
-        </motion.section>
+        </div>
+      )}
 
-      </motion.div>
-    </div>
+    </motion.div>
   );
 }
