@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Activity, Search, Filter, ShieldAlert, Cpu, Lock, UserCheck, RefreshCw, Download
+  Activity, Search, Filter, ShieldAlert, Cpu, Lock, UserCheck, RefreshCw, Download, CheckCircle2
 } from "lucide-react";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
 
