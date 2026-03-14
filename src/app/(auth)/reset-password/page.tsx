@@ -1,12 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Lock, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import { staggerContainer, fadeSlideUp } from "@/lib/animations";
+import { useAuthStore } from "@/lib/authStore";
+import { useDataStore } from "@/lib/dataStore";
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const isFirstLogin = searchParams.get("first") === "1";
+  const { user } = useAuthStore();
+
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
@@ -16,9 +24,26 @@ export default function ResetPasswordPage() {
   const submit = () => {
     const e: typeof errors = {};
     if (password.length < 8) e.password = "Min. 8 characters required";
+    if (!/[A-Z]/.test(password)) e.password = "Must include an uppercase letter";
+    if (!/[0-9]/.test(password)) e.password = "Must include a number";
+    if (!/[^A-Za-z0-9]/.test(password)) e.password = "Must include a special character";
     if (password !== confirm) e.confirm = "Passwords do not match";
     if (Object.keys(e).length) { setErrors(e); return; }
+    // Persist new password + clear firstLogin flag
+    if (user) {
+      useDataStore.getState().updateUser(user.id, { password, firstLogin: false });
+    }
     setDone(true);
+    if (isFirstLogin) {
+      setTimeout(() => {
+        const role = useAuthStore.getState().activeRole;
+        const ROLE_HOME: Record<string, string> = {
+          admin: "/dashboard", department_head: "/dashboard",
+          subject_lead: "/dashboard", faculty: "/faculty/dashboard", student: "/student/dashboard",
+        };
+        router.push(role ? ROLE_HOME[role] || "/dashboard" : "/dashboard");
+      }, 2000);
+    }
   };
 
   const strength = [password.length >= 8, /[A-Z]/.test(password), /[0-9]/.test(password), /[^A-Za-z0-9]/.test(password)];
@@ -94,5 +119,13 @@ export default function ResetPasswordPage() {
         )}
       </motion.div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-cosmic" />}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }

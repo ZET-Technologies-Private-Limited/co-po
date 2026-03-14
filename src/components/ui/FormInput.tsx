@@ -16,7 +16,7 @@ interface FormInputProps {
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
-  type?: 'text' | 'email' | 'number' | 'date' | 'textarea';
+  type?: 'text' | 'email' | 'number' | 'date' | 'password' | 'textarea';
   placeholder?: string;
   required?: boolean;
   autoTrim?: boolean; // SF-01

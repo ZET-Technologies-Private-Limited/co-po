@@ -1,137 +1,438 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { 
-  Shield, Users, Calendar, Settings, 
-  Activity, Database, AlertCircle,
-  CheckCircle2, Clock, BarChart3, Lock
-} from "lucide-react";
+import { motion } from "framer-motion";
+import { ChevronDown, ChevronUp, ChevronRight } from "lucide-react";
 import { useAuthStore } from "@/lib/authStore";
+import { useDataStore } from "@/lib/dataStore";
+import { computeCOAttainmentFromMarks } from "@/lib/computations";
 import { staggerContainer, fadeSlideUp } from "@/lib/animations";
 
-// ─── MOCK ADMIN DATA (Spec-aligned) ──────────────────────────────────────
-const SYSTEM_STATS = [
-  { label: "Active Users", val: "142", sub: "12 Online Now", icon: Users },
-  { label: "Pending Approvals", val: "11", sub: "Across 4 Departments", icon: Clock },
-  { label: "AY 2024-25", val: "Active", sub: "Lock Date: 30 June", icon: Calendar, color: "text-brand" },
-  { label: "System Health", val: "99.9%", sub: "Last Backup: 4h ago", icon: Shield, color: "text-attain" },
-];
+// ── helpers ──────────────────────────────────────────────────
 
-const DEPT_OVERVIEW = [
-  { dept: "Computer Science", coGen: 98, marksAppr: 88, poAvg: 72 },
-  { dept: "Electronics", coGen: 85, marksAppr: 72, poAvg: 68 },
-  { dept: "Mechanical", coGen: 92, marksAppr: 95, poAvg: 75 },
-];
+function timeAgo(ts: string): string {
+  const diff = Date.now() - new Date(ts.replace(" ", "T")).getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins  < 1)  return "just now";
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin", department_head: "HOD", subject_lead: "Lead",
+  faculty: "Faculty", student: "Student",
+};
+
+const TYPE_COLOR: Record<string, string> = {
+  login: "text-attain", login_fail: "text-alert", co_generate: "text-brand",
+  marks: "text-white/50", approval: "text-aurora", override: "text-amber-400",
+  system: "text-white/30", user: "text-insight", ay_lock: "text-amber-400",
+  error: "text-alert",
+};
+
+const PAGE_SIZE = 20;
+
+// ── component ────────────────────────────────────────────────
 
 export function AdminDashboardView() {
   const { user } = useAuthStore();
+  const users       = useDataStore(s => s.users);
+  const courses     = useDataStore(s => s.courses);
+  const submissions = useDataStore(s => s.submissions);
+  const examConfigs = useDataStore(s => s.examConfigs);
+  const cos         = useDataStore(s => s.cos);
+  const ay          = useDataStore(s => s.ay);
+  const ayHistory   = useDataStore(s => s.ayHistory);
+  const auditLog    = useDataStore(s => s.auditLog);
+  const thresholds  = useDataStore(s => s.thresholds);
+  const grievances  = useDataStore(s => s.grievances);
+
+  const [auditPage, setAuditPage]       = useState(0);
+  const [errExpanded, setErrExpanded]   = useState(false);
+
+  // ── A1-03: user count table ──
+  const userStats = useMemo(() => {
+    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    const roles = ["admin", "department_head", "subject_lead", "faculty", "student"] as const;
+    return roles.map(role => {
+      const group = users.filter(u => u.roles.includes(role));
+      return {
+        role: ROLE_LABELS[role],
+        total:    group.length,
+        active:   group.filter(u => u.status === "active").length,
+        inactive: group.filter(u => u.status === "inactive").length,
+        newThisWeek: group.filter(u => new Date(u.joinedAt) >= weekAgo).length,
+      };
+    });
+  }, [users]);
+
+  // ── A1-04: dept progress table ──
+  const deptRows = useMemo(() => {
+    const depts = [...new Set(courses.map(c => c.dept))];
+    return depts.map(dept => {
+      const dc = courses.filter(c => c.dept === dept);
+      const withCOs = dc.filter(c => (cos[c.id] || []).length > 0).length;
+      const coGenPct = dc.length ? Math.round((withCOs / dc.length) * 100) : 0;
+
+      const allSubs = dc.flatMap(c => submissions[c.id] || []);
+      const approved = allSubs.filter(s => s.status === "approved").length;
+      const submitted = allSubs.filter(s => ["approved","pending","returned"].includes(s.status)).length;
+      const marksApprPct = submitted ? Math.round((approved / submitted) * 100) : 0;
+
+      let totalPct = 0, count = 0;
+      dc.forEach(c => {
+        const subs = (submissions[c.id] || []).filter(s => s.status === "approved");
+        const exams = examConfigs[c.id] || [];
+        const allMarks = subs.flatMap(s => s.students);
+        const allQs = exams.flatMap(e => e.questions);
+        if (allMarks.length && allQs.length) {
+          const att = computeCOAttainmentFromMarks(allMarks, allQs, thresholds.targetPassPct);
+          const vals = Object.values(att);
+          if (vals.length) { totalPct += vals.reduce((a, v) => a + v.pct, 0) / vals.length; count++; }
+        }
+      });
+      const poAvg = count ? Math.round(totalPct / count) : 0;
+
+      // open alerts = courses with any L1 CO
+      let openAlerts = 0;
+      dc.forEach(c => {
+        const subs = (submissions[c.id] || []).filter(s => s.status === "approved");
+        const exams = examConfigs[c.id] || [];
+        const allMarks = subs.flatMap(s => s.students);
+        const allQs = exams.flatMap(e => e.questions);
+        if (allMarks.length && allQs.length) {
+          const att = computeCOAttainmentFromMarks(allMarks, allQs, thresholds.targetPassPct);
+          openAlerts += Object.values(att).filter(v => v.pct < thresholds.level2).length;
+        }
+      });
+
+      return { dept, courses: dc.length, coGenPct, marksApprPct, poAvg, openAlerts };
+    });
+  }, [courses, cos, submissions, examConfigs, thresholds]);
+
+  // ── A1-05: pending actions ──
+  const pendingActions = useMemo(() => {
+    const items: { text: string; href: string }[] = [];
+
+    // Threshold not set (all zeros)
+    if (!thresholds.level3 && !thresholds.level2)
+      items.push({ text: "Attainment thresholds not configured for current AY", href: "/admin/thresholds" });
+
+    // AY near lock
+    if (ay.coLockDeadline) {
+      const days = Math.ceil((new Date(ay.coLockDeadline).getTime() - Date.now()) / 86400000);
+      if (days >= 0 && days <= 14)
+        items.push({ text: `AY ${ay.ay} CO lock deadline in ${days} day${days !== 1 ? "s" : ""} — review before locking`, href: "/admin/academic-year" });
+    }
+
+    // Courses with no COs
+    const noCOCourses = courses.filter(c => !(cos[c.id] || []).length);
+    if (noCOCourses.length)
+      items.push({ text: `${noCOCourses.length} course${noCOCourses.length !== 1 ? "s" : ""} have no COs generated`, href: "/admin/co-library" });
+
+    // Pending marks approvals
+    const pendingCount = Object.values(submissions).flat().filter(s => s.status === "pending").length;
+    if (pendingCount)
+      items.push({ text: `${pendingCount} marks submission${pendingCount !== 1 ? "s" : ""} awaiting lead approval`, href: "/admin/audit-log" });
+
+    // Inactive users
+    const inactive = users.filter(u => u.status === "inactive").length;
+    if (inactive)
+      items.push({ text: `${inactive} user account${inactive !== 1 ? "s" : ""} are inactive — review access`, href: "/admin/users" });
+
+    // Open grievances
+    const openGrievances = grievances.filter(g => g.status === "pending" || g.status === "under_review").length;
+    if (openGrievances)
+      items.push({ text: `${openGrievances} student grievance${openGrievances !== 1 ? "s" : ""} pending resolution`, href: "/admin/audit-log" });
+
+    // Open L1 alerts
+    const totalAlerts = deptRows.reduce((a, d) => a + d.openAlerts, 0);
+    if (totalAlerts)
+      items.push({ text: `${totalAlerts} Level 1 CO alert${totalAlerts !== 1 ? "s" : ""} across departments require remedial action`, href: "/admin/audit-log" });
+
+    return items;
+  }, [thresholds, ay, courses, cos, submissions, users, grievances, deptRows]);
+
+  // ── A1-06: events feed (paginated) ──
+  const allEvents = useMemo(() =>
+    [...auditLog].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 200),
+    [auditLog]
+  );
+  const totalPages = Math.ceil(allEvents.length / PAGE_SIZE);
+  const pageEvents = allEvents.slice(auditPage * PAGE_SIZE, (auditPage + 1) * PAGE_SIZE);
+
+  // ── A1-07: error log (last 24h) ──
+  const errorEntries = useMemo(() => {
+    const cutoff = Date.now() - 24 * 3600000;
+    return auditLog.filter(e =>
+      (e.type === "error" || e.result === "failure") &&
+      new Date(e.timestamp.replace(" ", "T")).getTime() >= cutoff
+    );
+  }, [auditLog]);
+
+  const errorGroups = useMemo(() => {
+    const map = new Map<string, { type: string; count: number; first: string }>();
+    errorEntries.forEach(e => {
+      const key = e.errorType || e.type;
+      const existing = map.get(key);
+      if (!existing || e.timestamp < existing.first)
+        map.set(key, { type: key, count: (existing?.count || 0) + 1, first: e.timestamp });
+      else
+        map.set(key, { ...existing, count: existing.count + 1 });
+    });
+    return [...map.values()];
+  }, [errorEntries]);
+
+  // ── AY table rows: current + history ──
+  const ayRows = useMemo(() => [
+    ay,
+    ...ayHistory.sort((a, b) => b.ay.localeCompare(a.ay)).slice(0, 2),
+  ], [ay, ayHistory]);
+
+  const thCol = "text-[10px] font-mono text-white/30 uppercase tracking-widest py-3 px-4 text-left";
+  const tdCol = "py-3 px-4 text-sm font-mono";
 
   return (
-    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="flex flex-col gap-16 pb-32">
-      
-      {/* ── HEADER ── */}
-      <motion.section variants={fadeSlideUp} className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 text-sm font-mono text-alert uppercase tracking-widest">
-          <span className="w-8 h-[1px] bg-alert" /> System Administrator
-        </div>
-        <div className="flex justify-between items-end">
-          <div>
-            <h1 className="text-5xl font-display text-white">
-              Admin Hub: <span className="text-white/40">{user?.name?.split(" ")[0]}</span>
-            </h1>
-            <p className="text-white/40 font-light mt-3">
-               University Edition · All Departments Portfolio
-            </p>
-          </div>
-          <div className="flex gap-4">
-             <Link href="/admin/thresholds" className="px-6 py-3 border border-white/10 text-white/40 text-[10px] font-mono uppercase tracking-widest hover:border-brand hover:text-brand transition-all flex items-center gap-2">
-               <Settings className="w-3.5 h-3.5" /> Thresholds
-             </Link>
-          </div>
-        </div>
+    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="flex flex-col gap-0 pb-32">
+
+      {/* ── PAGE HEADER ── */}
+      <motion.section variants={fadeSlideUp} className="pb-8 border-b border-white/5">
+        <p className="text-3xl font-display text-white mb-1">
+          Admin Hub: <span className="text-white/40">{user?.name?.split(" ")[0]}</span>
+        </p>
+
+        {/* A1-01: system status line */}
+        <p className="text-xs font-mono text-white/30 mt-3">
+          <span className="text-attain">API: Healthy</span>
+          {" | "}
+          <span className="text-attain">DB: Connected</span>
+          {" | "}
+          <span className="text-white/50">Active Users: {users.filter(u => u.status === "active").length}</span>
+          {" | "}
+          <span className="text-white/30">Last Backup: 2 hours ago</span>
+        </p>
       </motion.section>
 
-      {/* ── SYSTEM STATUS CARDS (Spec: Admin Page 1) ── */}
-      <motion.section variants={fadeSlideUp} className="grid md:grid-cols-4 gap-4">
-        {SYSTEM_STATS.map((stat, i) => (
-          <div key={i} className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
-            <div className="flex justify-between items-start mb-2">
-              <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">{stat.label}</p>
-              <stat.icon className={`w-3.5 h-3.5 ${stat.color || 'text-alert'}`} />
-            </div>
-            <p className={`text-2xl font-mono ${stat.color || 'text-white'}`}>{stat.val}</p>
-            <p className="text-[9px] text-white/20 font-mono mt-1">{stat.sub}</p>
-          </div>
-        ))}
-      </motion.section>
-
-      <div className="grid lg:grid-cols-3 gap-16">
-        
-        {/* ── DEPARTMENT OVERVIEW (Spec: Admin Page 1 table) ── */}
-        <motion.section variants={fadeSlideUp} className="lg:col-span-2 flex flex-col gap-8">
-           <h2 className="text-lg font-display text-white flex items-center gap-3">
-             <Database className="w-4 h-4 text-alert" /> Institutional Data Overview
-           </h2>
-           <div className="border border-white/10 overflow-hidden">
-             <table className="w-full text-left font-mono text-[10px]">
-               <thead className="bg-white/[0.03] border-b border-white/10">
-                 <tr>
-                   <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">Department</th>
-                   <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">CO Gen %</th>
-                   <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">Marks Appr %</th>
-                   <th className="px-6 py-4 text-white/30 uppercase tracking-widest font-normal">Avg PO %</th>
-                 </tr>
-               </thead>
-               <tbody className="divide-y divide-white/5">
-                 {DEPT_OVERVIEW.map((d, i) => (
-                   <tr key={i} className="hover:bg-white/[0.02] transition-colors group">
-                     <td className="px-6 py-5 text-white/70 font-display text-sm">{d.dept}</td>
-                     <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                           <div className="w-12 h-1 bg-white/5 rounded-full overflow-hidden">
-                              <div className="h-full bg-alert" style={{ width: `${d.coGen}%` }} />
-                           </div>
-                           <span className="text-white/40">{d.coGen}%</span>
-                        </div>
-                     </td>
-                     <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                           <div className="w-12 h-1 bg-white/5 rounded-full overflow-hidden">
-                              <div className="h-full bg-attain" style={{ width: `${d.marksAppr}%` }} />
-                           </div>
-                           <span className="text-white/40">{d.marksAppr}%</span>
-                        </div>
-                     </td>
-                     <td className="px-6 py-5 font-bold text-white">{d.poAvg}%</td>
-                   </tr>
-                 ))}
-               </tbody>
-             </table>
-           </div>
-        </motion.section>
-
-        {/* ── AUDIT FEED (Spec widget) ── */}
-        <motion.section variants={fadeSlideUp} className="flex flex-col gap-8">
-           <h2 className="text-[10px] font-mono text-white/20 uppercase tracking-[0.2em] flex items-center gap-2">
-             <Activity className="w-4 h-4" /> Activity Log
-           </h2>
-           <div className="flex flex-col gap-4">
-              {[
-                { event: "AY Roll-over simulation", time: "10 mins ago", user: "Admin (Self)" },
-                { event: "HOD Sign-off: CSE 2024-25", time: "1h ago", user: "Dr. K. Sharma" },
-                { event: "Security Audit: Marks override detected", time: "4h ago", user: "System" },
-                { event: "New Lead Provisioned: CS Sub Group", time: "yesterday", user: "Admin (Self)" }
-              ].map((ev, i) => (
-                <div key={i} className="p-4 bg-white/[0.01] border-l-2 border-alert flex flex-col gap-1">
-                  <p className="text-xs text-white/70">{ev.event}</p>
-                  <p className="text-[9px] font-mono text-white/20 uppercase">{ev.time} · {ev.user}</p>
-                </div>
+      {/* ── A1-02: AY STATUS TABLE ── */}
+      <motion.section variants={fadeSlideUp} className="py-8 border-b border-white/5">
+        <h2 className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-5">Academic Year Status</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/5">
+                {["AY Code", "Status", "Start", "End", "Locked By", "Locked On"].map(h => (
+                  <th key={h} className={thCol}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ayRows.map((row, i) => (
+                <tr key={row.ay} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                  <td className={`${tdCol} text-white font-medium`}>{row.ay}{i === 0 && <span className="ml-2 text-[9px] text-brand uppercase tracking-widest">current</span>}</td>
+                  <td className={`${tdCol} ${row.status === "active" ? "text-attain" : row.status === "locked" ? "text-amber-400" : "text-white/30"}`}>
+                    {row.status.charAt(0).toUpperCase() + row.status.slice(1)}
+                  </td>
+                  <td className={`${tdCol} text-white/40`}>{row.startDate}</td>
+                  <td className={`${tdCol} text-white/40`}>{row.endDate}</td>
+                  <td className={`${tdCol} text-white/40`}>{row.lockedBy || "—"}</td>
+                  <td className={`${tdCol} text-white/40`}>{row.lockedOn || "—"}</td>
+                </tr>
               ))}
-              <button className="text-[9px] font-mono text-white/20 mt-4 uppercase tracking-widest hover:text-white transition-colors">View Institutional Audit Trail →</button>
-           </div>
+            </tbody>
+          </table>
+        </div>
+      </motion.section>
+
+      {/* ── A1-03: USER COUNT TABLE ── */}
+      <motion.section variants={fadeSlideUp} className="py-8 border-b border-white/5">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[10px] font-mono text-white/30 uppercase tracking-widest">User Counts</h2>
+          <Link href="/admin/users" className="text-[10px] font-mono text-brand hover:text-white transition-colors uppercase tracking-widest flex items-center gap-1">
+            Manage Users <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/5">
+                {["Role", "Total Users", "Active", "Inactive", "New This Week"].map(h => (
+                  <th key={h} className={thCol}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {userStats.map(row => (
+                <tr key={row.role} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                  <td className={`${tdCol} text-white/60`}>{row.role}</td>
+                  <td className={`${tdCol} text-white`}>{row.total}</td>
+                  <td className={`${tdCol} text-attain`}>{row.active}</td>
+                  <td className={`${tdCol} ${row.inactive > 0 ? "text-alert" : "text-white/20"}`}>{row.inactive}</td>
+                  <td className={`${tdCol} ${row.newThisWeek > 0 ? "text-brand" : "text-white/20"}`}>{row.newThisWeek}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </motion.section>
+
+      {/* ── A1-04: DEPT PROGRESS TABLE ── */}
+      <motion.section variants={fadeSlideUp} className="py-8 border-b border-white/5">
+        <h2 className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-5">Department Progress</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/5">
+                {["Dept", "Courses", "CO Gen %", "Marks Approved %", "Avg PO Att %", "Open Alerts"].map(h => (
+                  <th key={h} className={thCol}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {deptRows.length === 0 ? (
+                <tr><td colSpan={6} className="py-8 px-4 text-white/20 text-xs italic">No department data.</td></tr>
+              ) : deptRows.map(row => (
+                <tr key={row.dept} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                  <td className={`${tdCol} text-white/60`}>{row.dept}</td>
+                  <td className={`${tdCol} text-white/40`}>{row.courses}</td>
+                  <td className={`${tdCol} ${row.coGenPct === 100 ? "text-attain" : row.coGenPct >= 50 ? "text-amber-400" : "text-alert"}`}>{row.coGenPct}%</td>
+                  <td className={`${tdCol} ${row.marksApprPct >= 80 ? "text-attain" : row.marksApprPct >= 50 ? "text-amber-400" : row.marksApprPct > 0 ? "text-alert" : "text-white/20"}`}>{row.marksApprPct}%</td>
+                  <td className={`${tdCol} ${row.poAvg >= 60 ? "text-attain" : row.poAvg >= 40 ? "text-amber-400" : row.poAvg > 0 ? "text-alert" : "text-white/20"}`}>{row.poAvg > 0 ? `${row.poAvg}%` : "—"}</td>
+                  <td className={`${tdCol} ${row.openAlerts > 0 ? "text-alert font-bold" : "text-white/20"}`}>{row.openAlerts}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </motion.section>
+
+      {/* ── A1-05: PENDING ACTIONS ── */}
+      <motion.section variants={fadeSlideUp} className="py-8 border-b border-white/5">
+        <h2 className="text-[10px] font-mono text-white/30 uppercase tracking-widest mb-5">Pending Actions</h2>
+        {pendingActions.length === 0 ? (
+          <p className="text-sm text-white/20 italic">No pending system actions. All tasks are complete.</p>
+        ) : (
+          <ol className="flex flex-col divide-y divide-white/5">
+            {pendingActions.map((item, i) => (
+              <li key={i} className="flex items-center justify-between py-3 gap-4">
+                <div className="flex items-center gap-4 min-w-0">
+                  <span className="text-xs font-mono text-white/20 w-5 shrink-0">{i + 1}.</span>
+                  <span className="text-sm text-white/60">{item.text}</span>
+                </div>
+                <Link href={item.href}
+                  className="text-xs font-mono text-brand hover:text-white transition-colors uppercase tracking-widest shrink-0 flex items-center gap-1">
+                  Go <ChevronRight className="w-3 h-3" />
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </motion.section>
+
+      {/* ── A1-06: EVENTS FEED ── */}
+      <motion.section variants={fadeSlideUp} className="py-8 border-b border-white/5">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-[10px] font-mono text-white/30 uppercase tracking-widest">System Events</h2>
+          <span className="text-[10px] font-mono text-white/20">
+            Page {auditPage + 1} of {Math.max(totalPages, 1)} · {allEvents.length} events
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/5">
+                {["Timestamp", "User", "Action", "Result"].map(h => (
+                  <th key={h} className={thCol}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pageEvents.length === 0 ? (
+                <tr><td colSpan={4} className="py-8 px-4 text-white/20 text-xs italic">No events recorded yet.</td></tr>
+              ) : pageEvents.map(entry => (
+                <tr key={entry.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                  <td className="py-3 px-4 text-[10px] font-mono text-white/30 whitespace-nowrap">{entry.timestamp}</td>
+                  <td className="py-3 px-4 text-xs font-mono text-white/40 whitespace-nowrap">{entry.userId}</td>
+                  <td className={`py-3 px-4 text-xs ${TYPE_COLOR[entry.type] ?? "text-white/40"}`}>{entry.action}</td>
+                  <td className="py-3 px-4 text-[10px] font-mono">
+                    {entry.result === "failure"
+                      ? <span className="text-alert">Failure</span>
+                      : entry.result === "success"
+                        ? <span className="text-attain">Success</span>
+                        : <span className="text-white/20">—</span>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center gap-4 mt-4">
+            <button
+              onClick={() => setAuditPage(p => Math.max(0, p - 1))}
+              disabled={auditPage === 0}
+              className="text-xs font-mono text-white/30 hover:text-white disabled:opacity-20 transition-colors uppercase tracking-widest"
+            >
+              ← Prev
+            </button>
+            <span className="text-[10px] font-mono text-white/20">{auditPage + 1} / {totalPages}</span>
+            <button
+              onClick={() => setAuditPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={auditPage >= totalPages - 1}
+              className="text-xs font-mono text-white/30 hover:text-white disabled:opacity-20 transition-colors uppercase tracking-widest"
+            >
+              Next →
+            </button>
+          </div>
+        )}
+      </motion.section>
+
+      {/* ── A1-07: ERROR LOG ── */}
+      {errorGroups.length > 0 && (
+        <motion.section variants={fadeSlideUp} className="py-8">
+          <button
+            onClick={() => setErrExpanded(e => !e)}
+            className="flex items-center gap-3 w-full text-left"
+          >
+            <h2 className="text-[10px] font-mono text-alert uppercase tracking-widest">
+              System Errors (Last 24h) — {errorEntries.length} event{errorEntries.length !== 1 ? "s" : ""}
+            </h2>
+            {errExpanded
+              ? <ChevronUp className="w-3.5 h-3.5 text-alert" />
+              : <ChevronDown className="w-3.5 h-3.5 text-alert" />
+            }
+          </button>
+
+          {errExpanded && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="border-b border-white/5">
+                    {["Error Type", "Count", "First Occurrence"].map(h => (
+                      <th key={h} className={thCol}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {errorGroups.map(eg => (
+                    <tr key={eg.type} className="border-b border-white/5">
+                      <td className="py-3 px-4 text-sm font-mono text-alert">{eg.type}</td>
+                      <td className="py-3 px-4 text-sm font-mono text-white/60">{eg.count}</td>
+                      <td className="py-3 px-4 text-xs font-mono text-white/30">{eg.first}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </motion.section>
-      </div>
+      )}
 
     </motion.div>
   );

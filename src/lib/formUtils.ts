@@ -38,6 +38,18 @@ export const stripPasteFormatting = (html: string): string => {
   return temp.textContent || temp.innerText || '';
 };
 
+// SF-06: Character counter
+export const getCharCountColor = (current: number, max: number): string => {
+  const percentage = (current / max) * 100;
+  if (percentage >= 90) return 'text-alert';
+  if (percentage >= 70) return 'text-amber-500';
+  return 'text-white/50';
+};
+
+export const formatCharCount = (current: number, max: number): string => {
+  return `${current} / ${max}`;
+};
+
 // SF-08: Duplicate check
 export const checkDuplicate = async (
   value: string,

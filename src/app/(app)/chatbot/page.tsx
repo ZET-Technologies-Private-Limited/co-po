@@ -1,13 +1,34 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Sparkles, BrainCircuit, Loader2 } from "lucide-react";
+import { Send, Sparkles, BrainCircuit, Loader2, RotateCcw, Save, BookOpen } from "lucide-react";
 import { staggerContainer, fadeSlideUp } from "@/lib/animations";
+import { useDataStore, PROGRAM_OUTCOMES } from "@/lib/dataStore";
+import { computeCOAttainmentFromMarks } from "@/lib/computations";
+import {
+  CHATBOT_FALLBACK_RESPONSES,
+  formatCOGenerationPrompt,
+  formatConfidenceScore,
+  generateSuggestedReplies,
+  getConfidenceColor,
+  requestBTJustification,
+  useChatbotMemory,
+  useChatbotWorkflowDraft,
+  type SuggestedReply,
+} from "@/lib/chatbotUtils";
+import { getAttainmentLevel } from "@/lib/statusIndicators";
 
-type Message = { id: number; role: "user" | "ai"; text: string };
+type Message = {
+  id: number;
+  role: "user" | "ai";
+  text: string;
+  confidence?: number;
+  suggestions?: SuggestedReply[];
+  isFallback?: boolean;
+};
 
-const SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS = [
   "Show CO attainment for DBMS",
   "Which CO has lowest attainment?",
   "Generate PO attainment summary",
@@ -15,44 +36,243 @@ const SUGGESTIONS = [
   "Compare T1 and T2 performance",
 ];
 
-const MOCK_RESPONSES: Record<string, string> = {
-  default: "I've analyzed your request. Based on the current attainment data, CO3 (Apply relational algebra concepts) shows 55% attainment – the lowest among all mapped outcomes. I recommend reviewing the examination type distribution for this CO.",
-};
-
-function getBotResponse(q: string): string {
-  if (q.toLowerCase().includes("lowest") || q.toLowerCase().includes("risk")) {
-    return "Based on the current data, **CO3** has the lowest attainment at **55%** (threshold: 60%). Courses at risk: EC201 – Digital Signal Processing at 67%, ME301 – Thermodynamics at 74%. Recommendations: increase practical coverage for CO3 and schedule supplementary assessments.";
-  }
-  if (q.toLowerCase().includes("dbms") || q.toLowerCase().includes("attainment")) {
-    return "CO Attainment for **DBMS (CS301)**:\n• CO1 – 82% ✓\n• CO2 – 74% ✓\n• CO3 – 55% ⚠ (Below threshold)\n• CO4 – 68% ✓\n• CO5 – 79% ✓\n• CO6 – 91% ✓\n\nOverall: **75%** — 5 of 6 COs above threshold.";
-  }
-  if (q.toLowerCase().includes("po") || q.toLowerCase().includes("program")) {
-    return "PO Attainment Summary for AY 2025-26:\n• PO1 Engineering Knowledge – 78%\n• PO2 Problem Analysis – 65%\n• PO3 Design/Dev of Solutions – 80%\n• PO7 Ethics – 55% ⚠ (Needs attention)\n\nOverall Program Attainment: **73%**";
-  }
-  return MOCK_RESPONSES.default;
-}
+const makeGreeting = (courseCode?: string) =>
+  `Hello. I'm your Nexus AI assistant. Ask about CO or PO attainment, weak outcomes, Bloom justification, or generate a course-outcome prompt${courseCode ? ` for ${courseCode}` : ""}.`;
 
 export default function ChatbotPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    { id: 1, role: "ai", text: "Hello! I'm your Nexus AI assistant. Ask me anything about CO/PO attainment, exam performance, or generate detailed reports." },
-  ]);
+  const courses = useDataStore(state => state.courses);
+  const cos = useDataStore(state => state.cos);
+  const submissions = useDataStore(state => state.submissions);
+  const examConfigs = useDataStore(state => state.examConfigs);
+  const thresholds = useDataStore(state => state.thresholds);
+
+  const [selectedCourseId, setSelectedCourseId] = useState("");
+  const draftCourseId = selectedCourseId || "global";
+  const { memory, recordMessage, setCourseContext, clearMemory } = useChatbotMemory(draftCourseId);
+  const { draft, isLoading, saveDraft, clearDraft } = useChatbotWorkflowDraft(draftCourseId, "validation");
+  const restoreHandledRef = useRef(false);
+  const [restoredAt, setRestoredAt] = useState<string | null>(null);
+
+  const selectedCourse = useMemo(
+    () => courses.find(course => course.id === selectedCourseId) || courses[0] || null,
+    [courses, selectedCourseId]
+  );
+
+  const greeting = useMemo(() => ({ id: 1, role: "ai" as const, text: makeGreeting(selectedCourse?.code) }), [selectedCourse?.code]);
+  const [messages, setMessages] = useState<Message[]>([greeting]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const courseInsights = useMemo(
+    () =>
+      courses
+        .map(course => {
+          const approved = (submissions[course.id] || []).filter(entry => entry.status === "approved");
+          const students = approved.flatMap(entry => entry.students);
+          const questions = (examConfigs[course.id] || []).flatMap(entry => entry.questions);
+          if (!students.length || !questions.length) return null;
+
+          const attainment = computeCOAttainmentFromMarks(students, questions, thresholds.targetPassPct);
+          const outcomes = Object.entries(attainment)
+            .map(([co, details]) => ({ co, pct: details.pct }))
+            .sort((left, right) => left.pct - right.pct);
+          if (!outcomes.length) return null;
+
+          const overall = outcomes.reduce((sum, item) => sum + item.pct, 0) / outcomes.length;
+          return {
+            course,
+            outcomes,
+            weakest: outcomes[0],
+            overall,
+          };
+        })
+        .filter(Boolean),
+    [courses, submissions, examConfigs, thresholds]
+  );
+
+  const selectedInsight = useMemo(() => {
+    const direct = courseInsights.find(item => item?.course.id === selectedCourse?.id);
+    return direct || courseInsights[0] || null;
+  }, [courseInsights, selectedCourse]);
+
+  const lowestCourse = useMemo(() => {
+    const sorted = [...courseInsights].sort((left, right) => (left?.overall || 0) - (right?.overall || 0));
+    return sorted[0] || null;
+  }, [courseInsights]);
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  useEffect(() => {
+    if (!courses.length || selectedCourseId) return;
+    setSelectedCourseId(courses[0].id);
+  }, [courses, selectedCourseId]);
+
+  useEffect(() => {
+    restoreHandledRef.current = false;
+    setRestoredAt(null);
+    setMessages([greeting]);
+    setInput("");
+  }, [draftCourseId, greeting]);
+
+  useEffect(() => {
+    if (!selectedCourse) return;
+    setCourseContext(selectedCourse.name, selectedCourse.code, undefined, PROGRAM_OUTCOMES.map(outcome => outcome.id));
+  }, [selectedCourse, setCourseContext]);
+
+  useEffect(() => {
+    if (!draft || restoreHandledRef.current) return;
+    const data = draft.data || {};
+    if (Array.isArray(data.messages) && data.messages.length) {
+      setMessages(data.messages as Message[]);
+    }
+    if (typeof data.input === "string") {
+      setInput(data.input);
+    }
+    restoreHandledRef.current = true;
+    setRestoredAt(new Date(draft.savedAt).toLocaleString());
+  }, [draft]);
+
+  useEffect(() => {
+    if (!selectedCourse) return;
+    if (messages.length === 1 && !input.trim() && !restoredAt) return;
+    const handle = window.setTimeout(() => {
+      saveDraft(typing ? 2 : 1, { input, messages }, memory);
+    }, 500);
+
+    return () => window.clearTimeout(handle);
+  }, [selectedCourse, input, messages, typing, saveDraft, memory, restoredAt]);
+
+  const buildResponse = (query: string): Omit<Message, "id" | "role"> => {
+    const lower = query.toLowerCase();
+    const selectedCourseCOs = (selectedCourse && cos[selectedCourse.id]) || [];
+    const weakestCO = selectedInsight?.weakest;
+
+    if ((lower.includes("lowest") || lower.includes("risk")) && lowestCourse) {
+      return {
+        text: `Current risk snapshot:\n• Lowest course average: ${lowestCourse.course.code} - ${lowestCourse.course.name} at ${lowestCourse.overall.toFixed(1)}%\n• Weakest CO: ${lowestCourse.weakest.co} at ${lowestCourse.weakest.pct.toFixed(1)}% (${getAttainmentLevel(lowestCourse.weakest.pct)})\n• Recommended action: review the mapped questions for ${lowestCourse.weakest.co} and assign a remedial cycle before the next approval window.`,
+        confidence: 91,
+        suggestions: generateSuggestedReplies("risk", "feedback"),
+      };
+    }
+
+    if ((lower.includes("attainment") || lower.includes("course")) && selectedInsight) {
+      const lines = selectedInsight.outcomes
+        .slice(0, 6)
+        .map(item => `• ${item.co} - ${item.pct.toFixed(1)}% (${getAttainmentLevel(item.pct)})`)
+        .join("\n");
+      return {
+        text: `CO attainment for ${selectedInsight.course.code} - ${selectedInsight.course.name}:\n${lines}\n\nAverage attainment: ${selectedInsight.overall.toFixed(1)}%\nWeakest mapped outcome: ${selectedInsight.weakest.co} at ${selectedInsight.weakest.pct.toFixed(1)}%.`,
+        confidence: 89,
+        suggestions: generateSuggestedReplies("attainment", "mapping"),
+      };
+    }
+
+    if (lower.includes("po") || lower.includes("program")) {
+      const baseline = courseInsights.length
+        ? courseInsights.reduce((sum, item) => sum + (item?.overall || 0), 0) / courseInsights.length
+        : 0;
+      const poLines = PROGRAM_OUTCOMES.slice(0, 4)
+        .map((po, index) => `• ${po.id} ${po.name} - ${Math.max(42, Math.min(92, Math.round(baseline + 8 - index * 4)))}%`)
+        .join("\n");
+      return {
+        text: `Program outcome preview for the current dataset:\n${poLines}\n\nThis is a quick assistant summary for discussion. Use the PO attainment screen for the audited report and trace view.`,
+        confidence: 73,
+        suggestions: generateSuggestedReplies("po", "mapping"),
+      };
+    }
+
+    if (lower.includes("bloom") || lower.includes("bt")) {
+      const targetCO = selectedCourseCOs.find(item => item.co === weakestCO?.co) || selectedCourseCOs[0];
+      if (!targetCO) {
+        return {
+          text: CHATBOT_FALLBACK_RESPONSES.unclear,
+          confidence: 34,
+          suggestions: generateSuggestedReplies("fallback", "feedback"),
+          isFallback: true,
+        };
+      }
+
+      return {
+        text: requestBTJustification(`${targetCO.co}: ${targetCO.desc}`, targetCO.bloomCode || "App"),
+        confidence: 78,
+        suggestions: generateSuggestedReplies("bloom", "btm_justification"),
+      };
+    }
+
+    if (lower.includes("generate") && lower.includes("co") && selectedCourse) {
+      const existingCOs = Object.fromEntries(((cos[selectedCourse.id] || []).map(item => [item.co, item.desc])));
+      return {
+        text: formatCOGenerationPrompt({
+          type: "partial",
+          courseId: selectedCourse.id,
+          courseCode: selectedCourse.code,
+          courseSyllabus: `${selectedCourse.name} syllabus context`,
+          existingCOs,
+          targetCOs: Object.keys(existingCOs).slice(0, 2),
+          programOutcomes: PROGRAM_OUTCOMES.slice(0, 5).map(outcome => outcome.id),
+          context: "Keep the statements measurable and aligned to the current threshold scheme.",
+        }),
+        confidence: 76,
+        suggestions: generateSuggestedReplies("generate", "co_generation"),
+      };
+    }
+
+    if (lower.includes("history") || lower.includes("conversation")) {
+      const history = memory.conversationHistory.slice(-6);
+      if (!history.length) {
+        return {
+          text: "No stored session history yet. Ask a question and I will keep the context for this session and restore it from draft recovery.",
+          confidence: 86,
+          suggestions: DEFAULT_SUGGESTIONS.slice(0, 3).map(text => ({ text, action: "clarify" as const })),
+        };
+      }
+
+      return {
+        text: history.map(entry => `${entry.role === "assistant" ? "Nexus AI" : "You"}: ${entry.content}`).join("\n"),
+        confidence: 82,
+        suggestions: generateSuggestedReplies("history", "feedback"),
+      };
+    }
+
+    return {
+      text: CHATBOT_FALLBACK_RESPONSES.unclear,
+      confidence: 32,
+      suggestions: DEFAULT_SUGGESTIONS.slice(0, 4).map(text => ({ text, action: "clarify" as const })),
+      isFallback: true,
+    };
+  };
 
   const send = (q: string) => {
     if (!q.trim()) return;
     const userMsg: Message = { id: Date.now(), role: "user", text: q };
     setMessages(prev => [...prev, userMsg]);
+    recordMessage("user", q);
     setInput("");
     setTyping(true);
-    const delay = 1200 + q.length * 15;
+    const delay = 700 + q.length * 10;
     setTimeout(() => {
+      const response = buildResponse(q);
       setTyping(false);
-      setMessages(prev => [...prev, { id: Date.now() + 1, role: "ai", text: getBotResponse(q) }]);
+      recordMessage("assistant", response.text);
+      setMessages(prev => [...prev, { id: Date.now() + 1, role: "ai", ...response }]);
     }, delay);
+  };
+
+  const visibleSuggestions = useMemo(() => {
+    const lastAssistant = [...messages].reverse().find(message => message.role === "ai");
+    if (lastAssistant?.suggestions?.length) {
+      return lastAssistant.suggestions.map(item => item.text);
+    }
+    return DEFAULT_SUGGESTIONS;
+  }, [messages]);
+
+  const resetConversation = async () => {
+    setMessages([greeting]);
+    setInput("");
+    clearMemory();
+    await clearDraft();
+    setRestoredAt(null);
   };
 
   return (
@@ -61,15 +281,51 @@ export default function ChatbotPage() {
 
         {/* Header */}
         <motion.div variants={fadeSlideUp} className="mb-8 shrink-0">
-          <div className="flex items-center gap-3 text-sm font-mono text-aurora uppercase tracking-widest mb-4">
-            <BrainCircuit className="w-4 h-4" /> Nexus Intelligence
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 text-sm font-mono text-aurora uppercase tracking-widest mb-4">
+                <BrainCircuit className="w-4 h-4" /> Nexus Intelligence
+              </div>
+              <h1 className="text-4xl font-display text-white">AI Assistant</h1>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={() => void resetConversation()} className="flex items-center gap-2 border border-white/10 px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-white/50 hover:border-white/30 hover:text-white transition-colors">
+                <RotateCcw className="w-3.5 h-3.5" /> Clear session
+              </button>
+              <button onClick={() => saveDraft(typing ? 2 : 1, { input, messages }, memory)} className="flex items-center gap-2 border border-white/10 px-3 py-2 text-[10px] font-mono uppercase tracking-widest text-white/50 hover:border-white/30 hover:text-white transition-colors">
+                <Save className="w-3.5 h-3.5" /> Save draft
+              </button>
+            </div>
           </div>
-          <h1 className="text-4xl font-display text-white">AI Assistant</h1>
+          <div className="mt-6 grid gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+            <div>
+              <p className="text-[10px] font-mono uppercase tracking-widest text-white/35">Course context</p>
+              <div className="mt-2 flex items-center gap-3 text-sm text-white/70">
+                <BookOpen className="h-4 w-4 text-brand" />
+                <select
+                  value={selectedCourse?.id || ""}
+                  onChange={event => setSelectedCourseId(event.target.value)}
+                  className="min-w-[240px] border border-white/10 bg-transparent px-3 py-2 text-sm text-white outline-none transition-colors hover:border-white/30"
+                >
+                  {courses.map(course => (
+                    <option key={course.id} value={course.id} className="bg-[#0D1829]">
+                      {course.code} - {course.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-white/30">
+              <div>{memory.conversationHistory.length} messages in memory</div>
+              {restoredAt && <div className="mt-2 text-attain">Draft restored at {restoredAt}</div>}
+              {isLoading && <div className="mt-2 text-white/20">Loading saved draft...</div>}
+            </div>
+          </div>
         </motion.div>
 
         {/* Suggestion Chips */}
         <motion.div variants={fadeSlideUp} className="flex gap-3 flex-wrap mb-6 shrink-0">
-          {SUGGESTIONS.map(s => (
+          {visibleSuggestions.map(s => (
             <button key={s} onClick={() => send(s)}
               className="px-4 py-2 border border-white/10 text-white/50 text-xs font-mono hover:border-aurora/50 hover:text-aurora transition-colors uppercase tracking-wide">
               {s}
@@ -95,7 +351,11 @@ export default function ChatbotPage() {
                   <p className={`leading-relaxed whitespace-pre-line font-light text-lg ${msg.role === "ai" ? "text-white/80" : "text-white"}`}>
                     {msg.text}
                   </p>
-                  <span className="text-xs font-mono text-white/20 mt-2 block">{msg.role === "ai" ? "Nexus AI" : "You"}</span>
+                  <div className={`mt-2 flex flex-wrap gap-3 text-xs font-mono ${msg.role === "user" ? "justify-end text-white/20" : "text-white/20"}`}>
+                    <span>{msg.role === "ai" ? "Nexus AI" : "You"}</span>
+                    {typeof msg.confidence === "number" && <span className={getConfidenceColor(msg.confidence)}>{formatConfidenceScore(msg.confidence)}</span>}
+                    {msg.isFallback && <span className="text-alert">Fallback guidance</span>}
+                  </div>
                 </div>
               </motion.div>
             ))}

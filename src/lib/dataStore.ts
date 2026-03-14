@@ -20,7 +20,8 @@ export type CourseRecord = {
   examType: string;
   facultyId: string;
   leadId?: string;
-  mappings?: Record<string, Record<string, number>>; // co -> po -> weight
+  section?: string;     // A/B/C for multi-section courses
+  mappings?: Record<string, Record<string, number>>;
 };
 
 export type CODefinition = {
@@ -70,6 +71,7 @@ export type MarksSubmission = {
   status: "draft" | "pending" | "approved" | "returned";
   submittedAt?: string;
   approvedBy?: string;
+  approvedAt?: string;   // ISO timestamp when lead approved — used for grievance deadline
   returnReason?: string;
 };
 
@@ -77,13 +79,17 @@ export type UserRecord = {
   id: string;
   name: string;
   email: string;
-  password: string;     // plain text for demo; in prod would be hashed
+  password: string;
   employeeId: string;
   roles: Role[];
   dept: string;
   designation: string;
   status: "active" | "inactive";
   joinedAt: string;
+  lastLogin?: string;   // ISO timestamp
+  firstLogin?: boolean;
+  phone?: string;
+  alsoLead?: boolean;   // dual-role: faculty who is also a lead
 };
 
 export type AYConfig = {
@@ -94,7 +100,11 @@ export type AYConfig = {
   marksDeadline: string;
   coLockDeadline: string;
   poDeadline: string;
+  lockedBy?: string;
+  lockedOn?: string;
 };
+
+export type AYHistoryRecord = AYConfig;
 
 export type ThresholdConfig = {
   level3: number;      // ≥ this → Level 3
@@ -103,27 +113,64 @@ export type ThresholdConfig = {
   targetPassPct: number;
   cieWeight: number;
   seeWeight: number;
+  absentPolicy: "include" | "exclude";
+  minCOs: number;
+  maxCOs: number;
 };
 
 export type COLibrarySet = {
   id: string;
   name: string;
   dept: string;
+  courseCode: string;
+  regulation: string;
   bloomCode: string;
-  cos: { co: string; desc: string; bloomCode: string }[];
-  version: string;
+  cos: { co: string; desc: string; bloomCode: string; poMaps?: string }[];
+  version: number;
   status: "active" | "archived";
   createdAt: string;
+  updatedAt: string;
+};
+
+export type PODefinition = {
+  id: string;       // "PO1"…"PO12"
+  name: string;
+  statement: string;
+  category: "Technical" | "Professional" | "Social";
+  regulation: string;
+  version: number;
+};
+
+export type PSODefinition = {
+  id: string;       // "PSO1"…
+  dept: string;
+  name: string;
+  statement: string;
+  regulation: string;
+  version: number;
+};
+
+export type FacultyNotification = {
+  id: string;
+  type: "critical" | "success" | "reminder" | "system";
+  title: string;
+  message: string;
+  timestamp: string;
+  link: string;
+  read: boolean;
+  userId: string;
 };
 
 export type AuditEntry = {
   id: string;
-  type: "login" | "login_fail" | "co_generate" | "marks" | "approval" | "override" | "system" | "user" | "ay_lock";
+  type: "login" | "login_fail" | "co_generate" | "marks" | "approval" | "override" | "system" | "user" | "ay_lock" | "error";
   userId: string;
   role: string;
   action: string;
   ip: string;
   timestamp: string;
+  result?: "success" | "failure";
+  errorType?: string;
 };
 
 export type Grievance = {
@@ -133,26 +180,56 @@ export type Grievance = {
   examId: string;
   qno: string;
   text: string;
-  status: "open" | "resolved";
+  status: "pending" | "under_review" | "resolved_unchanged" | "resolved_updated" | "rejected";
   submittedAt: string;
   resolution?: string;
+  evidenceFileName?: string;
+  updatedMarks?: number;
 };
 
 // ─── DEFAULT SEED DATA ────────────────────────────────────────
 
+const DEFAULT_AY_HISTORY: AYHistoryRecord[] = [
+  { ay: "2023-24", status: "archived", startDate: "2023-07-01", endDate: "2024-04-30", marksDeadline: "2023-11-30", coLockDeadline: "2023-12-10", poDeadline: "2023-12-20", lockedBy: "Prof. Ravi Kumar", lockedOn: "2024-05-02" },
+  { ay: "2022-23", status: "archived", startDate: "2022-07-01", endDate: "2023-04-30", marksDeadline: "2022-11-30", coLockDeadline: "2022-12-10", poDeadline: "2022-12-20", lockedBy: "Prof. Ravi Kumar", lockedOn: "2023-05-01" },
+];
+
+const DEFAULT_SEED_AUDIT: AuditEntry[] = [
+  { id: "sa1",  type: "login",       userId: "u4", role: "faculty",         action: "Faculty login: Mr. Sanjay Kapoor",                    ip: "192.168.1.10", timestamp: "2024-11-01 09:12:00", result: "success" },
+  { id: "sa2",  type: "co_generate", userId: "u4", role: "faculty",         action: "Generated 6 COs for CS301 — DBMS",                    ip: "192.168.1.10", timestamp: "2024-11-01 09:45:00", result: "success" },
+  { id: "sa3",  type: "marks",       userId: "u4", role: "faculty",         action: "Submitted T1 marks for CS301 (10 students)",          ip: "192.168.1.10", timestamp: "2024-11-02 11:00:00", result: "success" },
+  { id: "sa4",  type: "approval",    userId: "u3", role: "subject_lead",    action: "Approved T1 marks for CS301 — DBMS",                  ip: "192.168.1.11", timestamp: "2024-11-03 14:30:00", result: "success" },
+  { id: "sa5",  type: "login",       userId: "u2", role: "department_head", action: "HOD login: Prof. Ravi Kumar",                         ip: "192.168.1.12", timestamp: "2024-11-04 08:55:00", result: "success" },
+  { id: "sa6",  type: "marks",       userId: "u4", role: "faculty",         action: "Submitted T2 marks for CS301 (10 students)",          ip: "192.168.1.10", timestamp: "2024-11-05 10:20:00", result: "success" },
+  { id: "sa7",  type: "login_fail",  userId: "unknown", role: "unknown",    action: "Failed login attempt for email: test@nexus.edu",      ip: "10.0.0.55",    timestamp: "2024-11-06 02:14:00", result: "failure" },
+  { id: "sa8",  type: "user",        userId: "u1", role: "admin",           action: "Provisioned new user: Dr. Anita Nair (FAC001)",       ip: "127.0.0.1",    timestamp: "2024-11-07 09:00:00", result: "success" },
+  { id: "sa9",  type: "system",      userId: "system", role: "system",      action: "Scheduled backup completed successfully",             ip: "127.0.0.1",    timestamp: "2024-11-08 03:00:00", result: "success" },
+  { id: "sa10", type: "co_generate", userId: "u4", role: "faculty",         action: "Generated 5 COs for CS401 — Machine Learning",        ip: "192.168.1.10", timestamp: "2024-11-09 11:30:00", result: "success" },
+  { id: "sa11", type: "login",       userId: "u5", role: "student",         action: "Student login: Aarav Sharma (21CS001)",               ip: "192.168.1.20", timestamp: "2024-11-10 08:00:00", result: "success" },
+  { id: "sa12", type: "override",    userId: "u1", role: "admin",           action: "Admin override: reset password for u4",              ip: "127.0.0.1",    timestamp: "2024-11-11 15:45:00", result: "success" },
+  { id: "sa13", type: "error",       userId: "system", role: "system",      action: "PDF parse error: invalid file format uploaded",       ip: "192.168.1.10", timestamp: "2024-11-12 10:05:00", result: "failure", errorType: "ParseError" },
+  { id: "sa14", type: "marks",       userId: "u4", role: "faculty",         action: "Draft saved: T3 marks for CS301",                    ip: "192.168.1.10", timestamp: "2024-11-13 14:00:00", result: "success" },
+  { id: "sa15", type: "approval",    userId: "u3", role: "subject_lead",    action: "Returned T2 marks for CS301 — reason: data mismatch", ip: "192.168.1.11", timestamp: "2024-11-14 16:20:00", result: "success" },
+  { id: "sa16", type: "login",       userId: "u3", role: "subject_lead",    action: "Subject Lead login: Dr. Anita Nair",                 ip: "192.168.1.11", timestamp: "2024-11-15 09:10:00", result: "success" },
+  { id: "sa17", type: "system",      userId: "system", role: "system",      action: "AY 2024-25 threshold config updated by admin",        ip: "127.0.0.1",    timestamp: "2024-11-16 11:00:00", result: "success" },
+  { id: "sa18", type: "error",       userId: "system", role: "system",      action: "Marks validation error: total exceeds max for Q3a",   ip: "192.168.1.10", timestamp: "2024-11-17 13:30:00", result: "failure", errorType: "ValidationError" },
+  { id: "sa19", type: "co_generate", userId: "u4", role: "faculty",         action: "Generated 4 COs for ME301 — Thermodynamics",          ip: "192.168.1.10", timestamp: "2024-11-18 10:00:00", result: "success" },
+  { id: "sa20", type: "login",       userId: "u1", role: "admin",           action: "Admin login: Dr. System Admin",                      ip: "127.0.0.1",    timestamp: "2024-11-19 08:30:00", result: "success" },
+];
+
 const DEFAULT_USERS: UserRecord[] = [
-  { id: "u1", name: "Dr. System Admin",    email: "admin@nexus.edu",   password: "Admin@123",   employeeId: "ADM001", roles: ["admin"],           dept: "Administration", designation: "System Administrator", status: "active", joinedAt: "2022-07-01" },
-  { id: "u2", name: "Prof. Ravi Kumar",    email: "hod@nexus.edu",     password: "Hod@1234",    employeeId: "HOD001", roles: ["department_head"], dept: "CSE",            designation: "Head of Department",   status: "active", joinedAt: "2019-06-01" },
-  { id: "u3", name: "Dr. Anita Nair",      email: "lead@nexus.edu",    password: "Lead@123",    employeeId: "FAC001", roles: ["subject_lead"],   dept: "CSE",            designation: "Associate Professor",  status: "active", joinedAt: "2020-08-01" },
-  { id: "u4", name: "Mr. Sanjay Kapoor",   email: "faculty@nexus.edu", password: "Faculty@1",   employeeId: "FAC002", roles: ["faculty"],         dept: "CSE",            designation: "Assistant Professor",  status: "active", joinedAt: "2021-07-01" },
-  { id: "u5", name: "Aarav Sharma",        email: "student@nexus.edu", password: "Student@1",   employeeId: "21CS001",roles: ["student"],         dept: "CSE",            designation: "B.Tech Student",       status: "active", joinedAt: "2021-08-01" },
+  { id: "u1", name: "Dr. System Admin",  email: "admin@nexus.edu",   password: "Admin@123",  employeeId: "ADM001", roles: ["admin"],           dept: "Administration", designation: "System Administrator", status: "active", joinedAt: "2022-07-01", lastLogin: "2024-11-19 08:30:00" },
+  { id: "u2", name: "Prof. Ravi Kumar",   email: "hod@nexus.edu",     password: "Hod@1234",   employeeId: "HOD001", roles: ["department_head"], dept: "CSE",            designation: "Head of Department",   status: "active", joinedAt: "2019-06-01", lastLogin: "2024-11-04 08:55:00" },
+  { id: "u3", name: "Dr. Anita Nair",     email: "lead@nexus.edu",    password: "Lead@123",   employeeId: "FAC001", roles: ["subject_lead"],   dept: "CSE",            designation: "Associate Professor",  status: "active", joinedAt: "2020-08-01", lastLogin: "2024-11-15 09:10:00" },
+  { id: "u4", name: "Mr. Sanjay Kapoor",  email: "faculty@nexus.edu", password: "Faculty@1",  employeeId: "FAC002", roles: ["faculty"],         dept: "CSE",            designation: "Assistant Professor",  status: "active", joinedAt: "2021-07-01", lastLogin: "2024-11-19 10:00:00" },
+  { id: "u5", name: "Aarav Sharma",       email: "student@nexus.edu", password: "Student@1",  employeeId: "21CS001", roles: ["student"],        dept: "CSE",            designation: "B.Tech Student",       status: "active", joinedAt: "2021-08-01", lastLogin: "2024-11-10 08:00:00", firstLogin: false },
 ];
 
 const DEFAULT_COURSES: CourseRecord[] = [
-  { id: "cs301", code: "CS301", name: "Database Management Systems", dept: "CSE", semester: 5, credits: 4, students: 60, examType: "Theory",              facultyId: "u4", leadId: "u3" },
-  { id: "cs401", code: "CS401", name: "Machine Learning",           dept: "CSE", semester: 7, credits: 4, students: 48, examType: "Theory",              facultyId: "u4", leadId: "u3" },
-  { id: "ec201", code: "EC201", name: "Digital Signal Processing",  dept: "ECE", semester: 4, credits: 3, students: 55, examType: "Theory + Practical",  facultyId: "u4", leadId: "u3" },
-  { id: "me301", code: "ME301", name: "Thermodynamics",             dept: "MECH",semester: 5, credits: 4, students: 71, examType: "Theory",              facultyId: "u4", leadId: "u3" },
+  { id: "cs301", code: "CS301", name: "Database Management Systems", dept: "CSE", semester: 5, credits: 4, students: 60, examType: "Theory",              facultyId: "u4", leadId: "u3", studentRolls: ["21CS001","21CS002","21CS003","21CS004","21CS005","21CS006","21CS007","21CS008","21CS009","21CS010"] },
+  { id: "cs401", code: "CS401", name: "Machine Learning",           dept: "CSE", semester: 7, credits: 4, students: 48, examType: "Theory",              facultyId: "u4", leadId: "u3", studentRolls: ["21CS001","21CS002","21CS003"] },
+  { id: "ec201", code: "EC201", name: "Digital Signal Processing",  dept: "ECE", semester: 4, credits: 3, students: 55, examType: "Theory + Practical",  facultyId: "u4", leadId: "u3", studentRolls: [] },
+  { id: "me301", code: "ME301", name: "Thermodynamics",             dept: "MECH",semester: 5, credits: 4, students: 71, examType: "Theory",              facultyId: "u4", leadId: "u3", studentRolls: [] },
 ];
 
 const DEFAULT_COS: Record<string, CODefinition[]> = {
@@ -237,7 +314,7 @@ const DEFAULT_MARKS: Record<string, MarksSubmission[]> = {
   cs301: [
     {
       courseId: "cs301", examId: "t1", status: "approved",
-      submittedAt: "2024-09-10T10:00:00Z", approvedBy: "u3",
+      submittedAt: "2024-09-10T10:00:00Z", approvedBy: "u3", approvedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       students: [
         { roll: "21CS001", name: "Aarav Sharma",  marks: { Q1: 4, Q2: 4, Q3a: 8,  Q3b: 0  }, eitherOrChoices: { Q3: "a" } },
         { roll: "21CS002", name: "Priya Verma",   marks: { Q1: 5, Q2: 3, Q3a: 0,  Q3b: 7  }, eitherOrChoices: { Q3: "b" } },
@@ -291,30 +368,67 @@ const DEFAULT_THRESHOLDS: ThresholdConfig = {
   targetPassPct: 50,
   cieWeight: 40,
   seeWeight: 60,
+  absentPolicy: "include",
+  minCOs: 4,
+  maxCOs: 6,
 };
 
 const DEFAULT_CO_LIBRARY: COLibrarySet[] = [
   {
-    id: "lib1", name: "Database Systems — Standard Set", dept: "CSE", bloomCode: "L3", version: "v2.1",
-    status: "active", createdAt: "2023-06-01",
+    id: "lib1", name: "Database Systems — Standard Set", dept: "CSE", courseCode: "CS301",
+    regulation: "R21", bloomCode: "L3", version: 2, status: "active",
+    createdAt: "2023-06-01", updatedAt: "2024-10-12",
     cos: [
-      { co: "CO1", desc: "Design ER diagrams and relational models",    bloomCode: "L6" },
-      { co: "CO2", desc: "Apply normalization techniques up to BCNF",   bloomCode: "L3" },
-      { co: "CO3", desc: "Formulate complex SQL queries",               bloomCode: "L3" },
-      { co: "CO4", desc: "Analyse indexing and query optimization",     bloomCode: "L4" },
-      { co: "CO5", desc: "Implement ACID-compliant transaction systems", bloomCode: "L3" },
+      { co: "CO1", desc: "Design ER diagrams and relational models",    bloomCode: "L6", poMaps: "PO1, PO2" },
+      { co: "CO2", desc: "Apply normalization techniques up to BCNF",   bloomCode: "L3", poMaps: "PO1, PO3" },
+      { co: "CO3", desc: "Formulate complex SQL queries",               bloomCode: "L3", poMaps: "PO1" },
+      { co: "CO4", desc: "Analyse indexing and query optimization",     bloomCode: "L4", poMaps: "PO2, PO4" },
+      { co: "CO5", desc: "Implement ACID-compliant transaction systems", bloomCode: "L3", poMaps: "PO3, PO5" },
     ]
   },
   {
-    id: "lib2", name: "Machine Learning — Core Set", dept: "CSE", bloomCode: "L3", version: "v1.4",
-    status: "active", createdAt: "2023-06-01",
+    id: "lib2", name: "Machine Learning — Core Set", dept: "CSE", courseCode: "CS401",
+    regulation: "R21", bloomCode: "L3", version: 1, status: "active",
+    createdAt: "2023-06-01", updatedAt: "2024-09-05",
     cos: [
-      { co: "CO1", desc: "Understand supervised and unsupervised ML methods", bloomCode: "L2" },
-      { co: "CO2", desc: "Apply regression and classification algorithms",    bloomCode: "L3" },
-      { co: "CO3", desc: "Analyse model overfitting and regularization",     bloomCode: "L4" },
-      { co: "CO4", desc: "Design neural network architectures",              bloomCode: "L6" },
+      { co: "CO1", desc: "Understand supervised and unsupervised ML methods", bloomCode: "L2", poMaps: "PO1" },
+      { co: "CO2", desc: "Apply regression and classification algorithms",    bloomCode: "L3", poMaps: "PO2" },
+      { co: "CO3", desc: "Analyse model overfitting and regularization",     bloomCode: "L4", poMaps: "PO3, PSO1" },
+      { co: "CO4", desc: "Design neural network architectures",              bloomCode: "L6", poMaps: "PO4" },
     ]
   },
+  {
+    id: "lib3", name: "Database Systems — Legacy Set", dept: "CSE", courseCode: "CS301",
+    regulation: "R18", bloomCode: "L3", version: 1, status: "archived",
+    createdAt: "2021-06-01", updatedAt: "2021-08-10",
+    cos: [
+      { co: "CO1", desc: "Design ER models",          bloomCode: "L3", poMaps: "PO1" },
+      { co: "CO2", desc: "Write SQL queries",          bloomCode: "L3", poMaps: "PO1" },
+      { co: "CO3", desc: "Explain storage structures", bloomCode: "L2", poMaps: "PO1" },
+      { co: "CO4", desc: "List concurrency issues",    bloomCode: "L1", poMaps: "PO2" },
+    ]
+  },
+];
+
+const DEFAULT_PO_DEFINITIONS: PODefinition[] = [
+  { id: "PO1",  name: "Engineering Knowledge",        regulation: "R21", version: 1, category: "Technical",     statement: "Apply the knowledge of mathematics, science, engineering fundamentals, and an engineering specialization to the solution of complex engineering problems." },
+  { id: "PO2",  name: "Problem Analysis",             regulation: "R21", version: 1, category: "Technical",     statement: "Identify, formulate, review research literature, and analyze complex engineering problems reaching substantiated conclusions using first principles of mathematics, natural sciences, and engineering sciences." },
+  { id: "PO3",  name: "Design/Development of Solutions", regulation: "R21", version: 1, category: "Technical", statement: "Design solutions for complex engineering problems and design system components or processes that meet the specified needs with appropriate consideration for the public health and safety, and the cultural, societal, and environmental considerations." },
+  { id: "PO4",  name: "Conduct Investigations",       regulation: "R21", version: 1, category: "Technical",     statement: "Use research-based knowledge and research methods including design of experiments, analysis and interpretation of data, and synthesis of the information to provide valid conclusions." },
+  { id: "PO5",  name: "Modern Tool Usage",            regulation: "R21", version: 1, category: "Technical",     statement: "Create, select, and apply appropriate techniques, resources, and modern engineering and IT tools including prediction and modeling to complex engineering activities with an understanding of the limitations." },
+  { id: "PO6",  name: "Engineer & Society",           regulation: "R21", version: 1, category: "Social",        statement: "Apply reasoning informed by the contextual knowledge to assess societal, health, safety, legal and cultural issues and the consequent responsibilities relevant to the professional engineering practice." },
+  { id: "PO7",  name: "Environment & Sustainability", regulation: "R21", version: 1, category: "Social",        statement: "Understand the impact of the professional engineering solutions in societal and environmental contexts, and demonstrate the knowledge of, and need for sustainable development." },
+  { id: "PO8",  name: "Ethics",                       regulation: "R21", version: 1, category: "Professional",  statement: "Apply ethical principles and commit to professional ethics and responsibilities and norms of the engineering practice." },
+  { id: "PO9",  name: "Individual & Teamwork",        regulation: "R21", version: 1, category: "Professional",  statement: "Function effectively as an individual, and as a member or leader in diverse teams, and in multidisciplinary settings." },
+  { id: "PO10", name: "Communication",                regulation: "R21", version: 1, category: "Professional",  statement: "Communicate effectively on complex engineering activities with the engineering community and with society at large, such as, being able to comprehend and write effective reports and design documentation." },
+  { id: "PO11", name: "Project Management",           regulation: "R21", version: 1, category: "Professional",  statement: "Demonstrate knowledge and understanding of the engineering and management principles and apply these to one's own work, as a member and leader in a team, to manage projects and in multidisciplinary environments." },
+  { id: "PO12", name: "Lifelong Learning",            regulation: "R21", version: 1, category: "Professional",  statement: "Recognize the need for, and have the preparation and ability to engage in independent and life-long learning in the broadest context of technological change." },
+];
+
+const DEFAULT_PSO_DEFINITIONS: PSODefinition[] = [
+  { id: "PSO1", dept: "CSE", name: "Algorithm Design",      regulation: "R21", version: 1, statement: "Specify, design, develop, test and maintain usable software systems using modern software engineering principles." },
+  { id: "PSO2", dept: "CSE", name: "Software Development",  regulation: "R21", version: 1, statement: "Use modern network and security engineering techniques for business-scale IT infrastructure and AI/ML solutions." },
+  { id: "PSO3", dept: "CSE", name: "Professional Practice", regulation: "R21", version: 1, statement: "Apply professional ethics and contribute to society through computing innovations and research." },
 ];
 
 export const CO_PO_MAPPING: Record<string, Record<string, number>> = {
@@ -361,7 +475,26 @@ interface DataState {
   thresholds: ThresholdConfig;
   coLibrary: COLibrarySet[];
   auditLog: AuditEntry[];
+  ayHistory: AYHistoryRecord[];
   grievances: Grievance[];
+  remedialActions: Record<string, Record<string, string>>;
+  facultyNotifications: FacultyNotification[];
+  poDefinitions: PODefinition[];
+  psoDefinitions: PSODefinition[];
+
+  // Optional: CO attainment overrides per course/CO (used by faculty view)
+  coOverrides?: Record<
+    string,
+    Record<
+      string,
+      {
+        original: number;
+        overridden: number;
+        by: string;
+        at: string;
+      }
+    >
+  >;
 
   // User CRUD
   addUser: (user: Omit<UserRecord, "id" | "joinedAt">) => void;
@@ -378,11 +511,17 @@ interface DataState {
   updateCO: (courseId: string, coId: string, patch: Partial<CODefinition>) => void;
   deleteCO: (courseId: string, coId: string) => void;
   setCOPOMapping: (courseId: string, mapping: Record<string, Record<string, number>>) => void;
+  setCOOverride?: (
+    courseId: string,
+    coId: string,
+    override: { original: number; overridden: number; by: string; at: string },
+  ) => void;
 
   // Exam Config
   addExamConfig: (courseId: string, exam: ExamConfig) => void;
   setExamConfig: (courseId: string, examId: string, patch: Partial<ExamConfig>) => void;
   setQuestions: (courseId: string, examId: string, questions: QuestionDef[]) => void;
+  deleteExamConfig: (courseId: string, examId: string) => void;
 
   // Marks
   setSubmission: (courseId: string, submission: MarksSubmission) => void;
@@ -394,14 +533,22 @@ interface DataState {
   // AY Config
   setAY: (config: Partial<AYConfig>) => void;
   lockAY: (signedBy: string) => void;
+  addAYHistory: (record: AYHistoryRecord) => void;
 
   // Thresholds
   setThresholds: (t: Partial<ThresholdConfig>) => void;
 
   // CO Library
-  addCOLibrarySet: (set: Omit<COLibrarySet, "id" | "createdAt">) => void;
+  addCOLibrarySet: (set: Omit<COLibrarySet, "id" | "createdAt" | "updatedAt">) => void;
   updateCOLibrarySet: (id: string, patch: Partial<COLibrarySet>) => void;
   archiveCOLibrarySet: (id: string) => void;
+  restoreCOLibrarySet: (id: string) => void;
+
+  // PO/PSO Master actions
+  updatePODefinition: (id: string, patch: Partial<PODefinition>) => void;
+  addPSODefinition: (pso: Omit<PSODefinition, "version">) => void;
+  updatePSODefinition: (id: string, patch: Partial<PSODefinition>) => void;
+  deletePSODefinition: (id: string) => void;
 
   // Audit
   addAuditEntry: (entry: Omit<AuditEntry, "id" | "timestamp">) => void;
@@ -409,6 +556,19 @@ interface DataState {
   // Grievances
   addGrievance: (g: Omit<Grievance, "id" | "submittedAt">) => void;
   resolveGrievance: (id: string, resolution: string) => void;
+  updateGrievanceStatus: (id: string, status: Grievance["status"], resolution?: string, updatedMarks?: number) => void;
+
+  // Remedial Actions
+  saveRemedialAction: (courseId: string, coId: string, action: string) => void;
+
+  // Submission status update (used by lead approval)
+  updateSubmissionStatus: (courseId: string, examId: string, status: MarksSubmission["status"]) => void;
+
+  // Faculty Notifications
+  addFacultyNotification: (n: Omit<FacultyNotification, "id" | "timestamp" | "read">) => void;
+  markFacultyNotifRead: (id: string) => void;
+  deleteFacultyNotif: (id: string) => void;
+  markAllFacultyNotifsRead: (userId: string) => void;
 }
 
 function uid() {
@@ -433,8 +593,19 @@ export const useDataStore = create<DataState>()(
       ay: DEFAULT_AY,
       thresholds: DEFAULT_THRESHOLDS,
       coLibrary: DEFAULT_CO_LIBRARY,
-      auditLog: [],
+      poDefinitions: DEFAULT_PO_DEFINITIONS,
+      psoDefinitions: DEFAULT_PSO_DEFINITIONS,
+      auditLog: DEFAULT_SEED_AUDIT,
+      ayHistory: DEFAULT_AY_HISTORY,
       grievances: [],
+      remedialActions: {},
+      facultyNotifications: [
+        { id: "fn1", type: "reminder", title: "CO Generation Pending", message: "Course 'Database Management Systems' assigned but COs not yet generated after 7 days.", timestamp: "3 days ago", link: "/faculty/course/cs301/co-generation", read: false, userId: "u4" },
+        { id: "fn2", type: "reminder", title: "Deadline Reminder", message: "T2 marks upload deadline is in 3 days (Nov 30th). CS301 marks not yet submitted.", timestamp: "1 day ago", link: "/faculty/course/cs301/marks/t2", read: false, userId: "u4" },
+        { id: "fn3", type: "success", title: "Marks Approved", message: "Course Lead Dr. Anita has approved your T1 marks submission for CS301.", timestamp: "5 hours ago", link: "/faculty/dashboard", read: true, userId: "u4" },
+        { id: "fn4", type: "critical", title: "CO Level 1 Alert", message: "CO3 attainment for CS301 has fallen below 40%. Remedial action required immediately.", timestamp: "2 hours ago", link: "/faculty/course/cs301/co-attainment", read: false, userId: "u4" },
+        { id: "fn5", type: "system", title: "Academic Year Active", message: "AY 2024-25 is now active. All marks and CO data must be submitted by April 30th.", timestamp: "1 week ago", link: "/faculty/dashboard", read: true, userId: "u4" },
+      ],
 
       // ── User CRUD ──
       addUser: (user) => {
@@ -489,6 +660,13 @@ export const useDataStore = create<DataState>()(
             [courseId]: (s.examConfigs[courseId] || []).map(e => e.id === examId ? { ...e, questions } : e)
           }
         })),
+      deleteExamConfig: (courseId, examId) =>
+        set(s => ({
+          examConfigs: {
+            ...s.examConfigs,
+            [courseId]: (s.examConfigs[courseId] || []).filter(e => e.id !== examId)
+          }
+        })),
 
       // ── Marks ──
       setSubmission: (courseId: string, submission: MarksSubmission) =>
@@ -511,11 +689,12 @@ export const useDataStore = create<DataState>()(
           return { submissions: { ...s.submissions, [submission.courseId]: updated } };
         }),
       approveSubmission: (courseId, examId, approvedBy) => {
+        const approvedAt = new Date().toISOString();
         set(s => ({
           submissions: {
             ...s.submissions,
             [courseId]: (s.submissions[courseId] || []).map(m =>
-              m.examId === examId ? { ...m, status: "approved", approvedBy } : m
+              m.examId === examId ? { ...m, status: "approved", approvedBy, approvedAt } : m
             )
           }
         }));
@@ -536,20 +715,34 @@ export const useDataStore = create<DataState>()(
       // ── AY Config ──
       setAY: (config) => set(s => ({ ay: { ...s.ay, ...config } })),
       lockAY: (signedBy) => {
-        set(s => ({ ay: { ...s.ay, status: "locked" } }));
+        set(s => ({ ay: { ...s.ay, status: "locked", lockedBy: signedBy, lockedOn: now().split(" ")[0] } }));
         get().addAuditEntry({ type: "ay_lock", userId: signedBy, role: "department_head", action: `Academic Year ${get().ay.ay} locked and archived by ${signedBy}`, ip: "192.168.1.1" });
       },
+      addAYHistory: (record) =>
+        set(s => ({ ayHistory: [...s.ayHistory.filter(h => h.ay !== record.ay), record] })),
 
       // ── Thresholds ──
       setThresholds: (t) => set(s => ({ thresholds: { ...s.thresholds, ...t } })),
 
       // ── CO Library ──
       addCOLibrarySet: (set_) =>
-        set(s => ({ coLibrary: [...s.coLibrary, { ...set_, id: uid(), createdAt: now().split(" ")[0] }] })),
+        set(s => ({ coLibrary: [...s.coLibrary, { ...set_, id: uid(), createdAt: now().split(" ")[0], updatedAt: now().split(" ")[0] }] })),
       updateCOLibrarySet: (id, patch) =>
-        set(s => ({ coLibrary: s.coLibrary.map(l => l.id === id ? { ...l, ...patch } : l) })),
+        set(s => ({ coLibrary: s.coLibrary.map(l => l.id === id ? { ...l, ...patch, updatedAt: now().split(" ")[0], version: (l.version || 1) + 1 } : l) })),
       archiveCOLibrarySet: (id) =>
-        set(s => ({ coLibrary: s.coLibrary.map(l => l.id === id ? { ...l, status: "archived" } : l) })),
+        set(s => ({ coLibrary: s.coLibrary.map(l => l.id === id ? { ...l, status: "archived", updatedAt: now().split(" ")[0] } : l) })),
+      restoreCOLibrarySet: (id) =>
+        set(s => ({ coLibrary: s.coLibrary.map(l => l.id === id ? { ...l, status: "active", updatedAt: now().split(" ")[0] } : l) })),
+
+      // ── PO/PSO Master ──
+      updatePODefinition: (id, patch) =>
+        set(s => ({ poDefinitions: s.poDefinitions.map(p => p.id === id ? { ...p, ...patch, version: p.version + 1 } : p) })),
+      addPSODefinition: (pso) =>
+        set(s => ({ psoDefinitions: [...s.psoDefinitions, { ...pso, version: 1 }] })),
+      updatePSODefinition: (id, patch) =>
+        set(s => ({ psoDefinitions: s.psoDefinitions.map(p => p.id === id ? { ...p, ...patch, version: p.version + 1 } : p) })),
+      deletePSODefinition: (id) =>
+        set(s => ({ psoDefinitions: s.psoDefinitions.filter(p => p.id !== id) })),
 
       // ── Audit ──
       addAuditEntry: (entry) =>
@@ -562,13 +755,48 @@ export const useDataStore = create<DataState>()(
 
       // ── Grievances ──
       addGrievance: (g) =>
-        set(s => ({ grievances: [...s.grievances, { ...g, id: uid(), submittedAt: now(), status: "open" }] })),
+        set(s => ({ grievances: [...s.grievances, { ...g, id: uid(), submittedAt: now(), status: "pending" }] })),
       resolveGrievance: (id, resolution) =>
-        set(s => ({ grievances: s.grievances.map(g => g.id === id ? { ...g, status: "resolved", resolution } : g) })),
+        set(s => ({ grievances: s.grievances.map(g => g.id === id ? { ...g, status: "resolved_unchanged", resolution } : g) })),
+      updateGrievanceStatus: (id, status, resolution, updatedMarks) =>
+        set(s => ({ grievances: s.grievances.map(g => g.id === id ? { ...g, status, ...(resolution ? { resolution } : {}), ...(updatedMarks !== undefined ? { updatedMarks } : {}) } : g) })),
+
+      // ── Submission Status ──
+      updateSubmissionStatus: (courseId, examId, status) =>
+        set(s => ({
+          submissions: {
+            ...s.submissions,
+            [courseId]: (s.submissions[courseId] || []).map(m =>
+              m.examId === examId ? { ...m, status } : m
+            )
+          }
+        })),
+
+      // ── Faculty Notifications ──
+      addFacultyNotification: (n) =>
+        set(s => ({ facultyNotifications: [{ ...n, id: uid(), timestamp: "Just now", read: false }, ...s.facultyNotifications] })),
+      markFacultyNotifRead: (id) =>
+        set(s => ({ facultyNotifications: s.facultyNotifications.map(n => n.id === id ? { ...n, read: true } : n) })),
+      deleteFacultyNotif: (id) =>
+        set(s => ({ facultyNotifications: s.facultyNotifications.filter(n => n.id !== id) })),
+      markAllFacultyNotifsRead: (userId) =>
+        set(s => ({ facultyNotifications: s.facultyNotifications.map(n => n.userId === userId ? { ...n, read: true } : n) })),
+
+      // ── Remedial Actions ──
+      saveRemedialAction: (courseId, coId, action) =>
+        set(s => ({
+          remedialActions: {
+            ...s.remedialActions,
+            [courseId]: {
+              ...(s.remedialActions[courseId] || {}),
+              [coId]: action
+            }
+          }
+        })),
     }),
     {
       name: "obe-ai-data-store",
-      version: 1,
+      version: 4,
     }
   )
 );

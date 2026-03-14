@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 // SF-06: Character counter hook
 export const useCharacterCounter = (maxLength: number) => {
@@ -28,7 +28,7 @@ export const useCharacterCounter = (maxLength: number) => {
 export const useDuplicateCheck = (checkFn: (value: string) => Promise<boolean>) => {
   const [isDuplicate, setIsDuplicate] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
-  const debounceTimer = useRef<NodeJS.Timeout>();
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkValue = useCallback((value: string) => {
     setIsChecking(true);
@@ -83,7 +83,7 @@ export const useTableTabNavigation = (rows: number, cols: number) => {
   const [focusedCell, setFocusedCell] = useState<[number, number]>([0, 0]);
 
   const handleKeyDown = useCallback((
-    e: React.KeyboardEvent<HTMLInputElement>,
+    e: ReactKeyboardEvent<HTMLInputElement>,
     row: number,
     col: number
   ) => {

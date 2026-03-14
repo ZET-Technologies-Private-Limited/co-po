@@ -46,6 +46,7 @@ export const PERMISSIONS: Record<string, Record<Role, PermissionLevel>> = {
   year_end_lock:            { faculty: "no",   subject_lead: "no",   department_head: "yes",  admin: "yes",  student: "no"   },
   student_co_view:          { faculty: "no",   subject_lead: "no",   department_head: "no",   admin: "no",   student: "yes"  },
   student_marks_view:       { faculty: "no",   subject_lead: "no",   department_head: "no",   admin: "no",   student: "yes"  },
+  profile:                  { faculty: "yes",  subject_lead: "yes",  department_head: "yes",  admin: "yes",  student: "yes"  },
 };
 
 export function can(role: Role | null, feature: string): PermissionLevel {
@@ -66,6 +67,7 @@ export interface User {
   roles: Role[];
   department?: string;
   designation?: string;
+  firstLogin?: boolean;
 }
 
 interface AuthState {
@@ -123,6 +125,7 @@ export const useAuthStore = create<AuthState>()(
           id: found.id, name: found.name, email: found.email,
           employeeId: found.employeeId, roles: found.roles,
           department: found.dept, designation: found.designation,
+          firstLogin: found.firstLogin ?? false,
         };
         set({ user, activeRole: found.roles[0] as Role, isAuthenticated: true, loginError: null });
         return true;

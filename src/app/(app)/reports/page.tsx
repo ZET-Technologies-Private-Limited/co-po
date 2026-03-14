@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { FileText, Download, Loader2, CheckCircle2, FileSpreadsheet, Award, Lock, TrendingUp, AlertTriangle, BarChart2, Users, Briefcase } from "lucide-react";
+import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { FileText, Download, Loader2, CheckCircle2, FileSpreadsheet, Award, Lock, TrendingUp, AlertTriangle, BarChart2, Users, Briefcase, Printer } from "lucide-react";
 import { staggerContainer, fadeSlideUp } from "@/lib/animations";
 import { useAuthStore, Role } from "@/lib/authStore";
+import { useDataStore } from "@/lib/dataStore";
+import jsPDF from "jspdf";
+import * as XLSX from "xlsx";
 
 // ─── Report catalogue (Spec Section 11.1) ────────────────────────────────
 type ReportDef = {
@@ -87,26 +90,100 @@ const REPORT_CATALOGUE: ReportDef[] = [
 ];
 
 export default function ReportsPage() {
-  const { activeRole } = useAuthStore();
+  const { activeRole, activeAY, user } = useAuthStore();
+  const courses = useDataStore(s => s.courses);
+
   const [generating, setGenerating] = useState<string | null>(null);
   const [ready, setReady] = useState<string[]>([]);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [courseFilter, setCourseFilter] = useState("all");
 
   const visibleReports = REPORT_CATALOGUE.filter(r =>
     activeRole && r.allowedRoles.includes(activeRole)
   );
 
+  const scopedCourses = useMemo(() => {
+    if (activeRole === "faculty" && user?.id) {
+      return courses.filter(c => c.facultyId === user.id);
+    }
+    return courses;
+  }, [activeRole, user?.id, courses]);
+
+  const filteredCourses = useMemo(() => {
+    if (courseFilter === "all") return scopedCourses;
+    return scopedCourses.filter(c => c.id === courseFilter);
+  }, [scopedCourses, courseFilter]);
+
+  const buildRows = (reportName: string) => {
+    return filteredCourses.map((c, idx) => ({
+      SNo: idx + 1,
+      Report: reportName,
+      AY: activeAY,
+      CourseCode: c.code,
+      CourseName: c.name,
+      Semester: c.semester,
+      Section: c.section || "-",
+      Students: c.students,
+    }));
+  };
+
   const generate = (id: string) => {
     setGenerating(id);
     setTimeout(() => {
       setGenerating(null);
-      setReady(prev => [...prev, id]);
-    }, 2500);
+      setReady(prev => (prev.includes(id) ? prev : [...prev, id]));
+    }, 900);
   };
 
-  const download = (id: string, fmt: string) => {
+  const download = (id: string, fmt: "PDF" | "Excel") => {
+    const report = REPORT_CATALOGUE.find(r => r.id === id);
+    if (!report) return;
+
     setDownloading(`${id}-${fmt}`);
-    setTimeout(() => setDownloading(null), 1000);
+    const rows = buildRows(report.name);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const baseName = `${id}-${activeRole || "role"}-${activeAY}-${stamp}`;
+
+    try {
+      if (fmt === "Excel") {
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(
+          rows.length > 0
+            ? rows
+            : [{ Report: report.name, AY: activeAY, Note: "No rows for selected filter" }],
+        );
+        XLSX.utils.book_append_sheet(wb, ws, "Report");
+        XLSX.writeFile(wb, `${baseName}.xlsx`);
+      } else {
+        const doc = new jsPDF();
+        doc.setFontSize(14);
+        doc.text(report.name, 14, 16);
+        doc.setFontSize(10);
+        doc.text(`Role: ${activeRole || "-"} | AY: ${activeAY}`, 14, 24);
+        doc.text(`Generated: ${new Date().toLocaleString("en-IN")}`, 14, 30);
+
+        let y = 38;
+        if (!rows.length) {
+          doc.text("No rows for selected filter.", 14, y);
+        } else {
+          rows.forEach((row, idx) => {
+            if (y > 280) {
+              doc.addPage();
+              y = 20;
+            }
+            doc.text(
+              `${idx + 1}. ${row.CourseCode} - ${row.CourseName} | Sem ${row.Semester} | Sec ${row.Section} | Students ${row.Students}`,
+              14,
+              y,
+            );
+            y += 7;
+          });
+        }
+        doc.save(`${baseName}.pdf`);
+      }
+    } finally {
+      setDownloading(null);
+    }
   };
 
   return (
@@ -119,11 +196,40 @@ export default function ReportsPage() {
             <span className="w-8 h-[1px] bg-brand" />
             Reporting Suite
           </div>
-          <h1 className="text-5xl font-display text-white mb-4">Reports</h1>
-          <p className="text-white/40 font-light max-w-xl">
-            All reports are role-gated. You are viewing reports available to{" "}
-            <span className="text-white font-medium">{activeRole?.replace("_", " ")}</span>.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-5xl font-display text-white mb-4">Reports</h1>
+              <p className="text-white/40 font-light max-w-xl">
+                All reports are role-gated. You are viewing reports available to{" "}
+                <span className="text-white font-medium">{activeRole?.replace("_", " ")}</span>.
+              </p>
+              <div className="mt-4 flex items-center gap-3">
+                <label className="text-[10px] font-mono uppercase tracking-widest text-white/40">
+                  Course Filter
+                </label>
+                <select
+                  value={courseFilter}
+                  onChange={e => setCourseFilter(e.target.value)}
+                  className="bg-transparent border border-white/20 px-3 py-1.5 text-xs text-white/70 outline-none"
+                >
+                  <option value="all" className="bg-[#050509]">All Courses</option>
+                  {scopedCourses.map(c => (
+                    <option key={c.id} value={c.id} className="bg-[#050509]">
+                      {c.code} - {c.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[10px] font-mono text-white/30">AY {activeAY}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => window.print()}
+              aria-label="Print this page"
+              className="shrink-0 flex items-center gap-2 px-4 py-2.5 border border-white/20 text-white/60 text-xs font-mono uppercase tracking-widest hover:text-white hover:border-white/40 transition-colors print:hidden focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <Printer className="w-3.5 h-3.5" aria-hidden="true" /> Print
+            </button>
+          </div>
         </motion.div>
 
         {/* Report tiles */}

@@ -3,148 +3,494 @@
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { 
-  Layers, CheckCircle, Clock, AlertTriangle, 
-  ChevronRight, ArrowUpRight, BarChart3, Users, 
-  CheckCircle2, AlertCircle, Info, FileText
+import {
+  Layers,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  Users,
+  AlertCircle,
+  Info,
+  FileText,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/authStore";
-import { useDataStore } from "@/lib/dataStore";
+import { useDataStore, CO_PO_MAPPING } from "@/lib/dataStore";
+import {
+  computeCOAttainmentFromMarks,
+  computePOAttainment,
+  getAttainmentLevel,
+} from "@/lib/computations";
 import { staggerContainer, fadeSlideUp } from "@/lib/animations";
 
-// No more mock constants — data comes from dataStore
+type QueueItem = {
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  examId: string;
+  examName: string;
+  submittedAt?: string;
+  waitDays: number;
+  urgency: "Normal" | "High" | "Critical";
+};
 
 export function LeadDashboardView() {
-  const { user }      = useAuthStore();
-  const courses       = useDataStore(s => s.courses);
-  const submissions   = useDataStore(s => s.submissions);
-  const examConfigs   = useDataStore(s => s.examConfigs);
-  const thresholds    = useDataStore(s => s.thresholds);
+  const { user, activeAY } = useAuthStore();
+  const courses = useDataStore((s) => s.courses);
+  const submissions = useDataStore((s) => s.submissions);
+  const examConfigs = useDataStore((s) => s.examConfigs);
+  const thresholds = useDataStore((s) => s.thresholds);
+  const cos = useDataStore((s) => s.cos);
+  const coPOMappings = useDataStore((s) => s.coPOMappings);
+  const auditLog = useDataStore((s) => s.auditLog);
+  const ay = useDataStore((s) => s.ay);
 
-  // Build the real approval queue from pending submissions
-  const approvalQueue = useMemo(() => {
-    const items: { course: string; exam: string; courseId: string; submittedAt?: string }[] = [];
-    for (const c of courses) {
+  const myCourses = useMemo(
+    () => courses.filter((c) => c.leadId === user?.id),
+    [courses, user],
+  );
+
+  const nowMs = Date.now();
+
+  const approvalQueue: QueueItem[] = useMemo(() => {
+    const items: QueueItem[] = [];
+    myCourses.forEach((c) => {
       const subs = submissions[c.id] || [];
       const exams = examConfigs[c.id] || [];
-      for (const sub of subs) {
-        if (sub.status === "pending") {
-          const exam = exams.find(e => e.id === sub.examId);
-          items.push({ course: c.code, exam: exam?.name || sub.examId.toUpperCase(), courseId: c.id, submittedAt: sub.submittedAt?.substring(0, 10) });
-        }
-      }
-    }
-    return items;
-  }, [submissions, courses, examConfigs]);
+      subs
+        .filter((s) => s.status === "pending")
+        .forEach((sub) => {
+          const exam = exams.find((e) => e.id === sub.examId);
+          const submittedAt = sub.submittedAt;
+          const submittedMs = submittedAt ? new Date(submittedAt).getTime() : nowMs;
+          const waitDays = Math.max(
+            0,
+            Math.floor((nowMs - submittedMs) / (24 * 60 * 60 * 1000)),
+          );
+          const urgency =
+            waitDays > 3 ? "Critical" : waitDays >= 1 ? "High" : "Normal";
+          items.push({
+            courseId: c.id,
+            courseCode: c.code,
+            courseName: c.name,
+            examId: sub.examId,
+            examName: exam?.name || sub.examId.toUpperCase(),
+            submittedAt,
+            waitDays,
+            urgency,
+          });
+        });
+    });
+    return items.sort((a, b) => b.waitDays - a.waitDays);
+  }, [myCourses, submissions, examConfigs, nowMs]);
 
-  const poSummary = [
-    { label: "Courses Assigned", val: String(courses.length), icon: BarChart3, color: "text-brand" },
-    { label: "Pending Approvals", val: String(approvalQueue.length), icon: Clock, color: approvalQueue.length > 0 ? "text-amber-400" : "text-attain" },
-    { label: "Approved Exams",   val: String(Object.values(submissions).flat().filter(s => s.status === "approved").length), icon: CheckCircle2, color: "text-attain" },
-    { label: "Level 3 Threshold", val: `${thresholds.level3}%`, icon: AlertCircle, color: "text-brand" },
-  ];
+  const leadStats = useMemo(() => {
+    const pendingApprovals = approvalQueue.length;
+
+    let level1COs = 0;
+    let remedialNeeded = 0;
+
+    myCourses.forEach((course) => {
+      const subs = (submissions[course.id] || []).filter(
+        (s) => s.status === "approved",
+      );
+      if (!subs.length) return;
+      const allStudents = subs.flatMap((s) => s.students);
+      const exams = examConfigs[course.id] || [];
+      const questions = exams.flatMap((e) => e.questions);
+      if (!questions.length) return;
+      const att = computeCOAttainmentFromMarks(
+        allStudents,
+        questions,
+        thresholds.targetPassPct,
+      );
+      Object.values(att).forEach((v) => {
+        const lvl = getAttainmentLevel(v.pct, thresholds);
+        if (lvl.level === 1) {
+          level1COs += 1;
+          remedialNeeded += 1;
+        }
+      });
+    });
+
+    return {
+      courseCount: myCourses.length,
+      pendingApprovals,
+      level1COs,
+      remedialNeeded,
+    };
+  }, [myCourses, submissions, examConfigs, thresholds, approvalQueue]);
+
+  const coHealthRows = useMemo(() => {
+    return myCourses.map((course) => {
+      const subs = (submissions[course.id] || []).filter(
+        (s) => s.status === "approved",
+      );
+      const exams = examConfigs[course.id] || [];
+      const questions = exams.flatMap((e) => e.questions);
+      if (!subs.length || !questions.length) return null;
+      const allStudents = subs.flatMap((s) => s.students);
+      const att = computeCOAttainmentFromMarks(
+        allStudents,
+        questions,
+        thresholds.targetPassPct,
+      );
+      const coIds = ["CO1", "CO2", "CO3", "CO4", "CO5"];
+      const levels = coIds.map((co) => {
+        const v = att[co];
+        if (!v) return null;
+        const lvl = getAttainmentLevel(v.pct, thresholds);
+        return { co, level: lvl.level, pct: v.pct };
+      });
+      return {
+        course,
+        levels,
+      };
+    }).filter(Boolean) as {
+      course: (typeof myCourses)[number];
+      levels: ({ co: string; level: number; pct: number } | null)[];
+    }[];
+  }, [myCourses, submissions, examConfigs, thresholds]);
+
+  const totalLevel1AcrossCourses = useMemo(
+    () =>
+      coHealthRows.reduce(
+        (sum, row) =>
+          sum +
+          row.levels.filter((l) => l && l.level === 1).length,
+        0,
+      ),
+    [coHealthRows],
+  );
+
+  const poSummary = useMemo(() => {
+    const cosForPo: { co: string; pct: number }[] = [];
+    myCourses.forEach((course) => {
+      const subs = (submissions[course.id] || []).filter(
+        (s) => s.status === "approved",
+      );
+      const exams = examConfigs[course.id] || [];
+      const questions = exams.flatMap((e) => e.questions);
+      if (!subs.length || !questions.length) return;
+      const allStudents = subs.flatMap((s) => s.students);
+      const att = computeCOAttainmentFromMarks(
+        allStudents,
+        questions,
+        thresholds.targetPassPct,
+      );
+      Object.entries(att).forEach(([co, v]) => {
+        cosForPo.push({ co, pct: v.pct });
+      });
+    });
+    if (!cosForPo.length) return { poRows: [], psoLines: [] };
+
+    const mapping =
+      myCourses.length === 1 && coPOMappings[myCourses[0].id]
+        ? coPOMappings[myCourses[0].id]
+        : CO_PO_MAPPING;
+    const poAtt = computePOAttainment(cosForPo, mapping);
+
+    const poRows = Object.entries(poAtt).filter(([id]) =>
+      id.startsWith("PO"),
+    );
+    const psoEntries = Object.entries(poAtt).filter(([id]) =>
+      id.startsWith("PSO"),
+    );
+
+    const psoLines = psoEntries.map(([id, v]) => {
+      const lvl = getAttainmentLevel(v.pct, thresholds);
+      const met = lvl.level === 3 ? "Met" : lvl.level === 2 ? "Partial" : "Not Met";
+      return `${id}: ${v.pct}% (${lvl.label} — ${met})`;
+    });
+
+    return { poRows, psoLines };
+  }, [myCourses, submissions, examConfigs, thresholds, coPOMappings]);
+
+  const recentActions = useMemo(() => {
+    const courseCodes = new Set(myCourses.map((c) => c.code));
+    return auditLog
+      .filter(
+        (e) =>
+          e.userId === user?.id ||
+          Array.from(courseCodes).some((code) => e.action.includes(code)),
+      )
+      .slice(0, 10);
+  }, [auditLog, myCourses, user]);
 
   return (
-    <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="flex flex-col gap-16 pb-32">
-      
-      {/* ── HEADER ── */}
-      <motion.section variants={fadeSlideUp} className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 text-sm font-mono text-brand uppercase tracking-widest">
-          <span className="w-8 h-[1px] bg-brand" /> Coordinator Hub
-        </div>
-        <div>
-          <h1 className="text-5xl font-display text-white">
-            Lead Overview: <span className="text-white/40">{user?.name?.split(" ")[0]}</span>
-          </h1>
-          <p className="text-white/40 font-light mt-3">
-             Computer Science · Course Coordinator Portfolio
-          </p>
-        </div>
+    <motion.div
+      variants={staggerContainer}
+      initial="hidden"
+      animate="visible"
+      className="flex flex-col gap-10 pb-32"
+    >
+      {/* HEADER */}
+      <motion.section
+        variants={fadeSlideUp}
+        className="flex flex-col gap-3 border-b border-white/10 pb-5"
+      >
+        <h1 className="text-xl md:text-2xl font-mono text-white/70 uppercase tracking-widest">
+          Course Lead Dashboard — {user?.department || "Department"} | AY {activeAY}
+        </h1>
+        <p className="text-sm text-white/50 font-mono">
+          {leadStats.courseCount} courses | {leadStats.pendingApprovals} pending
+          approval | {leadStats.level1COs} Level 1 CO alerts |{" "}
+          {leadStats.remedialNeeded} remedial overdue
+        </p>
       </motion.section>
 
-      {/* ── PO/PSO SUMMARY CARDS (Spec: Page 1) ── */}
-      <motion.section variants={fadeSlideUp} className="grid md:grid-cols-4 gap-4">
-        {poSummary.map((stat, i) => (
-          <div key={i} className="p-6 border border-white/10 bg-white/[0.02] flex flex-col gap-1">
-            <div className="flex justify-between items-start mb-2">
-              <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest">{stat.label}</p>
-              <stat.icon className={`w-3.5 h-3.5 ${stat.color}`} />
+      <div className="grid lg:grid-cols-3 gap-10">
+        {/* LEFT: CO HEALTH & PO SUMMARY */}
+        <div className="lg:col-span-2 flex flex-col gap-10">
+          {/* CO HEALTH TABLE */}
+          <motion.section variants={fadeSlideUp} className="space-y-3">
+            <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest flex items-center gap-2">
+              <Layers className="w-4 h-4 text-brand" /> CO Health by Course
+            </h2>
+            <div className="overflow-x-auto border border-white/10 rounded-xl">
+              <table className="w-full border-collapse text-xs">
+                <thead className="bg-white/[0.02]">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-[9px] font-mono text-white/40 uppercase tracking-widest">
+                      Course
+                    </th>
+                    {["CO1", "CO2", "CO3", "CO4", "CO5"].map((co) => (
+                      <th
+                        key={co}
+                        className="px-3 py-2 text-center text-[9px] font-mono text-white/40 uppercase tracking-widest"
+                      >
+                        {co}
+                      </th>
+                    ))}
+                    <th className="px-4 py-2 text-left text-[9px] font-mono text-white/40 uppercase tracking-widest">
+                      Faculty
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coHealthRows.map(({ course, levels }) => (
+                    <tr
+                      key={course.id}
+                      className="border-t border-white/10 hover:bg-white/[0.02]"
+                    >
+                      <td className="px-4 py-2 font-mono text-xs text-white/60">
+                        {course.code}
+                      </td>
+                      {["CO1", "CO2", "CO3", "CO4", "CO5"].map((coId) => {
+                        const info = levels.find((l) => l?.co === coId);
+                        if (!info) {
+                          return (
+                            <td
+                              key={coId}
+                              className="px-3 py-2 text-center text-white/20"
+                            >
+                              —
+                            </td>
+                          );
+                        }
+                        const lvl = info.level;
+                        const label = lvl === 3 ? "L3" : lvl === 2 ? "L2" : "L1";
+                        const cls =
+                          lvl === 3
+                            ? "text-attain"
+                            : lvl === 2
+                            ? "text-amber-400"
+                            : "text-alert font-bold";
+                        return (
+                          <td
+                            key={coId}
+                            className="px-3 py-2 text-center font-mono"
+                          >
+                            <span className={cls}>{label}</span>
+                          </td>
+                        );
+                      })}
+                      <td className="px-4 py-2 text-xs text-white/50">
+                        Lead: {user?.name}
+                      </td>
+                    </tr>
+                  ))}
+                  {coHealthRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-4 py-4 text-center text-xs text-white/30 italic"
+                      >
+                        CO attainment will appear once marks are approved for your
+                        courses.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-            <p className={`text-2xl font-mono ${stat.color}`}>{stat.val}</p>
-          </div>
-        ))}
-      </motion.section>
+            {totalLevel1AcrossCourses > 0 && (
+              <p className="text-xs text-alert font-mono">
+                {totalLevel1AcrossCourses} COs at Level 1 across{" "}
+                {coHealthRows.length} courses require remedial action.
+              </p>
+            )}
+          </motion.section>
 
-      <div className="grid lg:grid-cols-2 gap-16">
-        
-        {/* ── ASSIGNED COURSES (Spec: Panel with Green/Amber/Red status) ── */}
-        <motion.section variants={fadeSlideUp} className="flex flex-col gap-8">
-          <h2 className="text-lg font-display text-white flex items-center gap-3">
-            <Layers className="w-4 h-4 text-brand" /> Course Portfolio
-          </h2>
-          <div className="flex flex-col gap-4">
-            {courses.map(course => (
-              <Link key={course.id} href={`/courses/${course.id}`} 
-                className="p-8 border border-white/10 hover:border-white/20 transition-all group flex items-center justify-between"
-              >
-                <div className="flex items-center gap-6">
-                  <div className="w-2 h-12 bg-brand/70" />
-                  <div>
-                    <p className="text-[10px] font-mono text-white/20 uppercase tracking-widest mb-1">{course.code}</p>
-                    <h3 className="text-xl font-display text-white group-hover:text-brand transition-colors">{course.name}</h3>
-                    <p className="text-[10px] text-white/30 font-mono mt-2 italic">{course.dept} &nbsp;·&nbsp; {course.credits} credits</p>
-                  </div>
-                </div>
-                <ChevronRight className="w-5 h-5 text-white/10 group-hover:text-white transition-colors" />
-              </Link>
-            ))}
-          </div>
-        </motion.section>
-
-        {/* ── MARKS APPROVAL QUEUE (Spec: Marks approval queue widget) ── */}
-        <motion.section variants={fadeSlideUp} className="flex flex-col gap-8">
-          <h2 className="text-lg font-display text-white flex items-center gap-3">
-            <Clock className="w-4 h-4 text-brand" /> Approval Queue
-          </h2>
-          <div className="flex flex-col gap-4">
-            {approvalQueue.length === 0 ? (
-              <div className="py-12 text-center text-white/20 italic text-xs font-mono">No pending approvals.</div>
-            ) : approvalQueue.map((item, i) => (
-              <div key={i} className="p-6 border border-white/10 bg-white/[0.01] flex items-center justify-between group">
-                <div className="flex items-center gap-4">
-                   <div className="w-10 h-10 rounded bg-brand/10 border border-brand/20 flex items-center justify-center text-brand">
-                     <FileText className="w-5 h-5" />
-                   </div>
-                   <div>
-                     <p className="text-sm text-white font-medium">{item.course} — {item.exam}</p>
-                     <p className="text-[10px] text-white/40 font-mono mt-1">Submitted {item.submittedAt || "recently"}</p>
-                   </div>
-                </div>
-                <Link href="/lead/marks-approval" className="px-4 py-2 border border-brand/30 text-brand text-[10px] font-mono uppercase tracking-widest hover:bg-brand hover:text-white transition-all">
-                  Review
-                </Link>
-              </div>
-            ))}
-            
-            {/* LOW ATTAINMENT ALERTS (Spec widget) */}
-            <div className="mt-8 p-8 border border-alert/20 bg-alert/[0.02]">
-              <h3 className="text-sm font-display text-alert mb-4 flex items-center gap-2 uppercase tracking-widest">
-                <AlertCircle className="w-4 h-4" /> Attainment Alerts
-              </h3>
-              <div className="flex flex-col gap-4">
-                <div className="flex items-start gap-4">
-                  <div className="w-1.5 h-1.5 rounded-full bg-alert mt-1.5" />
-                  <div>
-                    <p className="text-xs text-white/80">CS303 (OS) — CO2 is Level 1 (32%)</p>
-                    <p className="text-[10px] text-white/40 mt-1 italic">Faculty remedial action pending.</p>
-                  </div>
-                </div>
-              </div>
+          {/* PO / PSO SUMMARY */}
+          <motion.section variants={fadeSlideUp} className="space-y-3">
+            <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest flex items-center gap-2">
+              <Layers className="w-4 h-4 text-brand" /> PO Summary
+            </h2>
+            <div className="overflow-x-auto border border-white/10 rounded-xl">
+              <table className="w-full border-collapse text-xs">
+                <thead className="bg-white/[0.02]">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-[9px] font-mono text-white/40 uppercase tracking-widest">
+                      PO Code
+                    </th>
+                    <th className="px-4 py-2 text-right text-[9px] font-mono text-white/40 uppercase tracking-widest">
+                      Attainment%
+                    </th>
+                    <th className="px-4 py-2 text-left text-[9px] font-mono text-white/40 uppercase tracking-widest">
+                      Level
+                    </th>
+                    <th className="px-4 py-2 text-left text-[9px] font-mono text-white/40 uppercase tracking-widest">
+                      Target Met
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {poSummary.poRows.map(([po, v]) => {
+                    const lvl = getAttainmentLevel(v.pct, thresholds);
+                    const met =
+                      lvl.level === 3 ? "Yes" : lvl.level === 2 ? "Partial" : "No";
+                    return (
+                      <tr key={po} className="border-t border-white/10">
+                        <td className="px-4 py-2 font-mono text-xs text-white/60">
+                          {po}
+                        </td>
+                        <td className="px-4 py-2 text-right text-xs text-white/70">
+                          {v.pct}%
+                        </td>
+                        <td className="px-4 py-2 text-xs text-white/60">
+                          {lvl.label}
+                        </td>
+                        <td className="px-4 py-2 text-xs text-white/60">
+                          {met}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {poSummary.poRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-4 py-4 text-center text-xs text-white/30 italic"
+                      >
+                        PO/PSO attainment will appear once CO attainment is
+                        available.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          </div>
-        </motion.section>
+            {poSummary.psoLines.length > 0 && (
+              <p className="text-xs text-white/50">
+                {poSummary.psoLines.join(" | ")}
+              </p>
+            )}
+          </motion.section>
+        </div>
+
+        {/* RIGHT: APPROVAL QUEUE & RECENT ACTIONS */}
+        <div className="flex flex-col gap-10">
+          {/* APPROVAL QUEUE */}
+          <motion.section variants={fadeSlideUp} className="space-y-3">
+            <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest flex items-center gap-2">
+              <Clock className="w-4 h-4 text-brand" /> Approval Queue
+            </h2>
+            <div className="space-y-3">
+              {approvalQueue.length === 0 ? (
+                <div className="py-12 text-center border border-dashed border-white/15 rounded-xl text-xs text-white/30 italic">
+                  <CheckCircle2 className="w-5 h-5 mx-auto mb-2 text-attain/60" />
+                  No pending approvals.
+                </div>
+              ) : (
+                approvalQueue.map((item) => {
+                  const waitColor =
+                    item.waitDays > 3
+                      ? "text-alert"
+                      : item.waitDays >= 1
+                      ? "text-amber-400"
+                      : "text-attain";
+                  return (
+                    <div
+                      key={`${item.courseId}-${item.examId}`}
+                      className="p-4 border border-white/10 rounded-xl bg-white/[0.01] hover:bg-white/[0.03] transition-colors flex flex-col gap-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-white font-medium">
+                            {item.courseCode} · {item.examName}
+                          </p>
+                          <p className="text-[10px] text-white/40 font-mono">
+                            Submitted:{" "}
+                            {item.submittedAt
+                              ? item.submittedAt.slice(0, 10)
+                              : "—"}
+                          </p>
+                        </div>
+                        <span
+                          className={`text-[10px] font-mono uppercase ${waitColor}`}
+                        >
+                          {item.waitDays} day
+                          {item.waitDays === 1 ? "" : "s"} waiting
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                        <span className="text-[10px] font-mono text-white/40">
+                          Urgency: {item.urgency}
+                        </span>
+                        <Link
+                          href="/lead/marks-approval"
+                          className="text-[10px] font-mono text-brand hover:text-white uppercase tracking-widest flex items-center gap-1"
+                        >
+                          Review
+                          <FileText className="w-3 h-3" />
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </motion.section>
+
+          {/* RECENT ACTIONS */}
+          <motion.section variants={fadeSlideUp} className="space-y-3">
+            <h2 className="text-sm font-mono text-white/40 uppercase tracking-widest flex items-center gap-2">
+              <Users className="w-4 h-4 text-brand" /> Recent Actions
+            </h2>
+            <ol className="space-y-1 text-xs text-white/60">
+              {recentActions.length === 0 ? (
+                <li className="text-white/30 italic">
+                  No recent actions recorded for your courses.
+                </li>
+              ) : (
+                recentActions.map((e, idx) => (
+                  <li key={e.id} className="flex items-start gap-2">
+                    <span className="text-[10px] font-mono text-white/30 w-4">
+                      {idx + 1}.
+                    </span>
+                    <span>
+                      {e.action}
+                      <span className="ml-1 text-white/30 text-[10px] font-mono">
+                        — {e.timestamp}
+                      </span>
+                    </span>
+                  </li>
+                ))
+              )}
+            </ol>
+          </motion.section>
+        </div>
       </div>
-
     </motion.div>
   );
 }

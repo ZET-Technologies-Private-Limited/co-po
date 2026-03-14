@@ -1,0 +1,10 @@
+﻿src/app/(app)/courses/[id]/exam-config/page.tsx(58,7): error TS2353: Object literal may only specify known properties, and 'btCode' does not exist in type 'QuestionDef'.
+src/app/(app)/courses/[id]/exam-config/page.tsx(85,5): error TS2554: Expected 3 arguments, but got 2.
+src/app/(app)/courses/[id]/exam-config/page.tsx(233,44): error TS2339: Property 'btCode' does not exist on type 'QuestionDef'.
+src/app/(app)/courses/[id]/exam-config/page.tsx(233,87): error TS2353: Object literal may only specify known properties, and 'btCode' does not exist in type 'Partial<QuestionDef>'.
+src/app/logo-preview/page.tsx(15,3): error TS2305: Module '"@react-three/drei"' has no exported member 'Bloom'.
+src/app/logo-preview/page.tsx(16,3): error TS2305: Module '"@react-three/drei"' has no exported member 'EffectComposer'.
+src/components/dashboard/FacultyDashboardView.tsx(50,67): error TS2345: Argument of type 'ExamConfig[]' is not assignable to parameter of type 'QuestionMapping[]'.
+  Type 'ExamConfig' is missing the following properties from type 'QuestionMapping': qno, co
+src/components/dashboard/FacultyDashboardView.tsx(51,69): error TS2365: Operator '<' cannot be applied to types '{ attained: number; total: number; pct: number; }' and 'number'.
+src/components/dashboard/FacultyDashboardView.tsx(148,91): error TS2339: Property 'sem' does not exist on type 'CourseRecord'.
