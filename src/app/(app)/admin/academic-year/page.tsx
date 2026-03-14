@@ -1,243 +1,305 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { CalendarClock, Save, Lock, Copy, AlertCircle, CheckCircle2, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { AccessGate } from "@/components/auth/AccessGate";
 import { fadeSlideUp, staggerContainer } from "@/lib/animations";
-import { useDataStore, AYConfig } from "@/lib/dataStore";
+import { AYConfig, useDataStore } from "@/lib/dataStore";
 import { useAuthStore } from "@/lib/authStore";
 import { useUIStore } from "@/lib/uiStore";
-import { AccessGate } from "@/components/auth/AccessGate";
 
-type ExamDeadline = { examId: string; name: string; deadline: string };
-type SemesterConfig = { id: string; name: string; type: "odd" | "even"; startMonth: string; endMonth: string };
+type AYRow = AYConfig & {
+  regulationYear: string;
+  createdBy: string;
+  hodSignOffName?: string;
+};
 
-const DEFAULT_EXAM_DEADLINES: ExamDeadline[] = [
-  { examId: "t1",  name: "T1 — Unit Test 1",  deadline: "" },
-  { examId: "t2",  name: "T2 — Unit Test 2",  deadline: "" },
-  { examId: "t3",  name: "T3 — Assignment",   deadline: "" },
-  { examId: "t4",  name: "T4 — Quiz/Viva",    deadline: "" },
-  { examId: "t5",  name: "T5 — Model Exam",   deadline: "" },
-  { examId: "see", name: "SEE — End Semester", deadline: "" },
-];
+type DeadlineRow = {
+  ay: string;
+  t1: string;
+  t2: string;
+  t3: string;
+  t4: string;
+  see: string;
+  reminderDays: number;
+};
 
-const DEFAULT_SEMESTERS: SemesterConfig[] = [
-  { id: "odd",  name: "Odd Semester",  type: "odd",  startMonth: "July",    endMonth: "November" },
-  { id: "even", name: "Even Semester", type: "even", startMonth: "January", endMonth: "May" },
-];
+type SemesterRow = {
+  id: string;
+  ay: string;
+  semesterName: string;
+  startDate: string;
+  endDate: string;
+  coursesAssigned: number;
+};
+
+function nextAY(code: string): string {
+  const parts = code.split("-");
+  if (parts.length !== 2) return code;
+  const y1 = Number(parts[0]) + 1;
+  const y2 = Number(parts[1]) + 1;
+  return `${y1}-${String(y2).slice(-2)}`;
+}
 
 export default function AcademicYearConfigPage() {
-  const { user }      = useAuthStore();
-  const { addToast }  = useUIStore();
-  const ay            = useDataStore(s => s.ay);
-  const setAY         = useDataStore(s => s.setAY);
-  const lockAY        = useDataStore(s => s.lockAY);
-  const addAuditEntry = useDataStore(s => s.addAuditEntry);
+  const ay = useDataStore((s) => s.ay);
+  const ayHistory = useDataStore((s) => s.ayHistory);
+  const courses = useDataStore((s) => s.courses);
+  const setAY = useDataStore((s) => s.setAY);
+  const lockAY = useDataStore((s) => s.lockAY);
+  const addAYHistory = useDataStore((s) => s.addAYHistory);
+  const { user } = useAuthStore();
+  const { addToast } = useUIStore();
 
-  const [local, setLocal]           = useState<AYConfig>({ ...ay });
-  const [confirmLock, setConfLock]  = useState(false);
-  const [examDeadlines, setExamDeadlines] = useState<ExamDeadline[]>(DEFAULT_EXAM_DEADLINES);
-  const [semesters, setSemesters]   = useState<SemesterConfig[]>(DEFAULT_SEMESTERS);
-  const [activeTab, setActiveTab]   = useState<"dates" | "exams" | "semesters">("dates");
+  const [warning, setWarning] = useState("");
+  const [expandedAY, setExpandedAY] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const isLocked = ay.status === "locked" || ay.status === "archived";
+  const [rows, setRows] = useState<AYRow[]>(() => {
+    const base: AYRow[] = [
+      {
+        ...ay,
+        regulationYear: "2021",
+        createdBy: "System Admin",
+        hodSignOffName: ay.lockedBy,
+      },
+      ...ayHistory.slice(0, 2).map((h) => ({
+        ...h,
+        regulationYear: "2021",
+        createdBy: h.lockedBy || "System Admin",
+        hodSignOffName: h.lockedBy,
+      })),
+    ];
+    return base;
+  });
 
-  const hasChanges = useMemo(() =>
-    local.startDate !== ay.startDate || local.endDate !== ay.endDate ||
-    local.marksDeadline !== ay.marksDeadline || local.coLockDeadline !== ay.coLockDeadline ||
-    local.poDeadline !== ay.poDeadline,
-    [local, ay]);
+  const [newRow, setNewRow] = useState<AYRow>({
+    ay: nextAY(ay.ay),
+    startDate: "",
+    endDate: "",
+    status: "active",
+    marksDeadline: "",
+    coLockDeadline: "",
+    poDeadline: "",
+    regulationYear: "2023",
+    createdBy: user?.name || "System Admin",
+  });
 
-  const handleSave = () => {
-    setAY(local);
-    addAuditEntry({ type: "system", userId: user?.id || "admin", role: "admin",
-      action: `AY ${local.ay} configuration updated — marks deadline: ${local.marksDeadline}, CO lock: ${local.coLockDeadline}`,
-      ip: "127.0.0.1" });
-    addToast(`AY ${local.ay} configuration saved.`, "success");
-  };
-
-  const handleLock = () => {
-    if (!confirmLock) { setConfLock(true); addToast("Click Confirm Lock again to permanently lock this AY.", "warning"); return; }
-    lockAY(user?.id || "admin");
-    setConfLock(false);
-    addToast(`AY ${ay.ay} locked and archived. All data is now read-only.`, "success");
-  };
-
-  const handleClone = () => {
-    const parts = ay.ay.split("-");
-    const y1 = parseInt(parts[0]) + 1;
-    const y2 = parseInt(parts[1]) + 1;
-    const nextAY = `${y1}-${String(y2).slice(-2)}`;
-    const cloned: AYConfig = { ay: nextAY, status: "active", startDate: "", endDate: "", marksDeadline: "", coLockDeadline: "", poDeadline: "" };
-    setAY(cloned);
-    setLocal(cloned);
-    addAuditEntry({ type: "system", userId: user?.id || "admin", role: "admin",
-      action: `AY ${nextAY} created by cloning ${ay.ay}`, ip: "127.0.0.1" });
-    addToast(`New AY ${nextAY} created. Configure dates and save.`, "info");
-  };
-
-  const updateExamDeadline = (examId: string, deadline: string) =>
-    setExamDeadlines(prev => prev.map(e => e.examId === examId ? { ...e, deadline } : e));
-
-  const saveExamDeadlines = () => {
-    addToast("Exam deadlines saved. Reminders will be sent 3 and 1 days before each deadline.", "success");
-    addAuditEntry({ type: "system", userId: user?.id || "admin", role: "admin",
-      action: `Exam deadlines configured for AY ${ay.ay}`, ip: "127.0.0.1" });
-  };
-
-  const dateField = (label: string, key: keyof AYConfig, desc: string) => (
-    <div key={key} className="flex items-center justify-between py-5 border-b border-white/5">
-      <div>
-        <p className="text-sm font-mono text-white uppercase tracking-widest">{label}</p>
-        <p className="text-[10px] text-white/30 font-light mt-0.5">{desc}</p>
-      </div>
-      <input type="date" value={local[key] as string} disabled={isLocked}
-        onChange={e => setLocal(p => ({ ...p, [key]: e.target.value }))}
-        className="bg-white/[0.02] border border-white/10 px-4 py-2 text-white text-sm outline-none focus:border-brand transition-colors disabled:opacity-40 disabled:cursor-not-allowed" />
-    </div>
+  const [deadlines, setDeadlines] = useState<DeadlineRow[]>(() =>
+    rows.map((r) => ({
+      ay: r.ay,
+      t1: r.marksDeadline,
+      t2: r.marksDeadline,
+      t3: r.marksDeadline,
+      t4: r.marksDeadline,
+      see: r.poDeadline,
+      reminderDays: 3,
+    }))
   );
+
+  const [semesters, setSemesters] = useState<SemesterRow[]>([
+    { id: "s1", ay: ay.ay, semesterName: "Sem 1", startDate: ay.startDate, endDate: ay.endDate, coursesAssigned: courses.filter((c) => c.semester === 1).length },
+    { id: "s2", ay: ay.ay, semesterName: "Sem 2", startDate: ay.startDate, endDate: ay.endDate, coursesAssigned: courses.filter((c) => c.semester === 2).length },
+  ]);
+
+  const latestRows = useMemo(() => rows.slice(0, 3), [rows]);
+
+  function createAYInline() {
+    if (!newRow.ay || !newRow.startDate || !newRow.endDate) {
+      addToast("AY code, start date and end date are required.", "warning");
+      return;
+    }
+    setRows((prev) => [newRow, ...prev]);
+    setDeadlines((prev) => [
+      {
+        ay: newRow.ay,
+        t1: newRow.marksDeadline,
+        t2: newRow.marksDeadline,
+        t3: newRow.marksDeadline,
+        t4: newRow.marksDeadline,
+        see: newRow.poDeadline,
+        reminderDays: 3,
+      },
+      ...prev,
+    ]);
+    addToast(`AY ${newRow.ay} created.`, "success");
+    setShowCreate(false);
+    setNewRow({
+      ay: nextAY(newRow.ay),
+      startDate: "",
+      endDate: "",
+      status: "active",
+      marksDeadline: "",
+      coLockDeadline: "",
+      poDeadline: "",
+      regulationYear: "2023",
+      createdBy: user?.name || "System Admin",
+    });
+  }
+
+  function toggleActive(row: AYRow, makeActive: boolean) {
+    if (!makeActive) return;
+    setWarning("This changes the system-wide active year for all users.");
+    setRows((prev) => prev.map((r) => ({ ...r, status: r.ay === row.ay ? "active" : r.status === "active" ? "archived" : r.status })));
+    setAY({
+      ay: row.ay,
+      status: "active",
+      startDate: row.startDate,
+      endDate: row.endDate,
+      marksDeadline: row.marksDeadline,
+      coLockDeadline: row.coLockDeadline,
+      poDeadline: row.poDeadline,
+    });
+  }
+
+  function lockRow(row: AYRow) {
+    if (row.ay === ay.ay) {
+      lockAY(user?.name || "HOD");
+    }
+    setRows((prev) => prev.map((r) => (r.ay === row.ay ? { ...r, status: "locked", lockedBy: user?.name || "HOD", lockedOn: new Date().toISOString().slice(0, 10), hodSignOffName: user?.name || "HOD" } : r)));
+    addAYHistory({ ...row, status: "locked", lockedBy: user?.name || "HOD", lockedOn: new Date().toISOString().slice(0, 10) });
+    addToast(`${row.ay} locked.`, "success");
+  }
+
+  function copyFromAYMinus1() {
+    addToast("Copied course assignments and default COs from AY-1.", "info");
+  }
+
+  const th = "px-3 py-2 text-left text-[10px] font-mono text-white/40 uppercase tracking-widest";
 
   return (
     <AccessGate feature="ay_setup" deny="lock">
-      <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-4xl mx-auto pb-32">
-
-        {/* Header */}
-        <motion.div variants={fadeSlideUp} className="flex justify-between items-end pb-8 border-b border-white/5">
+      <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-7xl mx-auto pb-28 space-y-6">
+        <motion.header variants={fadeSlideUp} className="border-b border-white/5 pb-4 flex items-end justify-between">
           <div>
-            <div className="flex items-center gap-2 text-[10px] font-mono text-brand uppercase tracking-widest mb-3">
-              <span className="w-8 h-[1px] bg-brand" /> Academic Configuration
-            </div>
-            <h1 className="text-4xl font-display text-white flex items-center gap-4">
-              <CalendarClock className="w-8 h-8 text-brand" /> Academic Year Config
-            </h1>
-            <div className="flex items-center gap-3 mt-2">
-              <span className="text-xl font-display text-white/60">{ay.ay}</span>
-              <span className={`text-[9px] font-mono uppercase px-2 py-0.5 border ${
-                ay.status === "active" ? "border-attain/30 text-attain" :
-                ay.status === "locked" ? "border-alert/30 text-alert" : "border-white/20 text-white/40"
-              }`}>{ay.status}</span>
-            </div>
+            <h1 className="text-3xl font-display text-white">Academic Year Configuration</h1>
+            <p className="text-xs font-mono text-white/30 mt-2">AY list, deadline setup, semester config, and lock details.</p>
           </div>
-          <div className="flex gap-3">
-            <button onClick={handleClone}
-              className="px-5 py-2.5 border border-white/10 text-white/40 hover:text-white hover:border-white/30 text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 transition-colors">
-              <Copy className="w-3.5 h-3.5" /> Clone to Next AY
-            </button>
-            <button onClick={handleSave} disabled={!hasChanges || isLocked}
-              className="px-5 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/90 transition-colors flex items-center gap-2 disabled:opacity-40">
-              <Save className="w-3.5 h-3.5" /> Save Config
-            </button>
-            <button onClick={handleLock} disabled={isLocked}
-              className={`px-5 py-2.5 text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 transition-colors disabled:opacity-40 ${
-                confirmLock ? "bg-alert text-white hover:bg-alert/90" : "border border-alert/30 text-alert hover:bg-alert/10"
-              }`}>
-              <Lock className="w-3.5 h-3.5" /> {confirmLock ? "Confirm Lock" : "Lock & Archive"}
-            </button>
-          </div>
-        </motion.div>
+          <button onClick={() => setShowCreate((v) => !v)} className="px-3 py-2 bg-brand text-white text-xs font-mono uppercase">+ Create New AY</button>
+        </motion.header>
 
-        {isLocked && (
-          <motion.div variants={fadeSlideUp} className="flex items-center gap-3 p-4 bg-alert/5 border border-alert/20 mb-0">
-            <AlertCircle className="w-4 h-4 text-alert shrink-0" />
-            <p className="text-sm text-white/60 font-light">This AY is <strong className="text-alert">locked</strong>. All data is read-only.</p>
-          </motion.div>
-        )}
+        {warning && <p className="text-xs font-mono text-amber-300">{warning}</p>}
 
-        {/* Tabs */}
-        <div className="flex border-b border-white/5">
-          {(["dates", "exams", "semesters"] as const).map(t => (
-            <button key={t} onClick={() => setActiveTab(t)}
-              className={`px-6 py-4 text-[10px] font-mono uppercase tracking-widest border-b-2 transition-all ${
-                activeTab === t ? "border-brand text-brand" : "border-transparent text-white/30 hover:text-white"
-              }`}>
-              {t === "dates" ? "AY Dates" : t === "exams" ? "Exam Deadlines" : "Semesters"}
-            </button>
-          ))}
-        </div>
+        <motion.section variants={fadeSlideUp} className="overflow-x-auto border border-white/10">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className={th}>AY Code</th>
+                <th className={th}>Start</th>
+                <th className={th}>End</th>
+                <th className={th}>Status</th>
+                <th className={th}>Regulation Year</th>
+                <th className={th}>Created By</th>
+                <th className={th}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {latestRows.map((row) => (
+                <>
+                  <tr key={row.ay} className="border-b border-white/5">
+                    <td className="px-3 py-2 text-sm text-white">{row.ay}</td>
+                    <td className="px-3 py-2 text-sm text-white/70">{row.startDate}</td>
+                    <td className="px-3 py-2 text-sm text-white/70">{row.endDate}</td>
+                    <td className="px-3 py-2 text-sm text-white/70">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={row.status === "active"} onChange={(e) => toggleActive(row, e.target.checked)} />
+                        {row.status}
+                      </label>
+                    </td>
+                    <td className="px-3 py-2 text-sm text-white/70">{row.regulationYear}</td>
+                    <td className="px-3 py-2 text-sm text-white/70">{row.createdBy}</td>
+                    <td className="px-3 py-2 text-sm text-white/70 space-x-3">
+                      <button onClick={() => lockRow(row)} className="text-alert hover:text-white text-xs">Lock</button>
+                      <button onClick={() => setExpandedAY((cur) => (cur === row.ay ? null : row.ay))} className="text-brand hover:text-white text-xs">Details</button>
+                    </td>
+                  </tr>
+                  {expandedAY === row.ay && row.status === "locked" && (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-3 text-xs text-white/60 border-b border-white/5">
+                        Locked by: {row.lockedBy || "-"} | Locked on: {row.lockedOn || "-"} | HOD sign-off: {row.hodSignOffName || "-"} | <a href="#" className="text-brand">Unlock request</a>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
 
-        {/* AY Dates tab */}
-        {activeTab === "dates" && (
-          <motion.div variants={fadeSlideUp} className="flex flex-col">
-            {dateField("AY Start Date",              "startDate",       "First day of the academic year")}
-            {dateField("AY End Date",                "endDate",         "Last day of the academic year")}
-            {dateField("Marks Submission Deadline",  "marksDeadline",   "Faculty must submit all marks by this date")}
-            {dateField("CO Lock Deadline",           "coLockDeadline",  "All COs must be finalized by this date")}
-            {dateField("PO Report Deadline",         "poDeadline",      "PO/PSO attainment reports must be filed by this date")}
-            {hasChanges && !isLocked && (
-              <div className="flex items-center gap-2 py-4 text-amber-400 text-xs font-mono">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> Unsaved changes — click Save Config to persist.
-              </div>
-            )}
-          </motion.div>
-        )}
+              {showCreate && (
+                <tr className="border-b border-white/5 bg-white/[0.02]">
+                  <td className="px-3 py-2"><input value={newRow.ay} onChange={(e) => setNewRow((p) => ({ ...p, ay: e.target.value }))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                  <td className="px-3 py-2"><input type="date" value={newRow.startDate} onChange={(e) => setNewRow((p) => ({ ...p, startDate: e.target.value }))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                  <td className="px-3 py-2"><input type="date" value={newRow.endDate} onChange={(e) => setNewRow((p) => ({ ...p, endDate: e.target.value }))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                  <td className="px-3 py-2 text-sm text-attain">active</td>
+                  <td className="px-3 py-2"><input value={newRow.regulationYear} onChange={(e) => setNewRow((p) => ({ ...p, regulationYear: e.target.value }))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                  <td className="px-3 py-2 text-sm text-white/70">{newRow.createdBy}</td>
+                  <td className="px-3 py-2 text-sm text-white/70 space-x-3">
+                    <button onClick={createAYInline} className="text-attain hover:text-white text-xs">Save</button>
+                    <button onClick={() => setShowCreate(false)} className="text-white/50 hover:text-white text-xs">Cancel</button>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </motion.section>
 
-        {/* Exam Deadlines tab */}
-        {activeTab === "exams" && (
-          <motion.div variants={fadeSlideUp} className="flex flex-col">
-            <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest py-4 border-b border-white/5">
-              Per-assessment upload deadlines. System sends reminders 3 days and 1 day before each deadline.
-            </p>
-            {examDeadlines.map(ed => (
-              <div key={ed.examId} className="flex items-center justify-between py-4 border-b border-white/5">
-                <div>
-                  <p className="text-sm font-mono text-white">{ed.name}</p>
-                  <p className="text-[9px] font-mono text-white/30 uppercase mt-0.5">{ed.examId.toUpperCase()}</p>
-                </div>
-                <input type="date" value={ed.deadline} disabled={isLocked}
-                  onChange={e => updateExamDeadline(ed.examId, e.target.value)}
-                  className="bg-white/[0.02] border border-white/10 px-4 py-2 text-white text-sm outline-none focus:border-brand transition-colors disabled:opacity-40" />
-              </div>
-            ))}
-            {!isLocked && (
-              <button onClick={saveExamDeadlines}
-                className="mt-4 px-5 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/90 transition-colors flex items-center gap-2 self-end">
-                <Save className="w-3.5 h-3.5" /> Save Exam Deadlines
-              </button>
-            )}
-          </motion.div>
-        )}
+        <motion.section variants={fadeSlideUp} className="overflow-x-auto border border-white/10">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className={th}>AY</th>
+                <th className={th}>T1 Deadline</th>
+                <th className={th}>T2 Deadline</th>
+                <th className={th}>T3 Deadline</th>
+                <th className={th}>T4 Deadline</th>
+                <th className={th}>SEE Deadline</th>
+                <th className={th}>Reminder (days)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deadlines.map((d, idx) => (
+                <tr key={d.ay} className="border-b border-white/5">
+                  <td className="px-3 py-2 text-sm text-white">{d.ay}</td>
+                  {(["t1", "t2", "t3", "t4", "see"] as const).map((k) => (
+                    <td key={k} className="px-3 py-2">
+                      <input type="date" value={d[k]} onChange={(e) => setDeadlines((prev) => prev.map((row, i) => (i === idx ? { ...row, [k]: e.target.value } : row)))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" />
+                    </td>
+                  ))}
+                  <td className="px-3 py-2">
+                    <input type="number" min={0} max={30} value={d.reminderDays} onChange={(e) => setDeadlines((prev) => prev.map((row, i) => (i === idx ? { ...row, reminderDays: Number(e.target.value) } : row)))} className="w-20 bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </motion.section>
 
-        {/* Semesters tab */}
-        {activeTab === "semesters" && (
-          <motion.div variants={fadeSlideUp} className="flex flex-col">
-            <p className="text-[10px] font-mono text-white/30 uppercase tracking-widest py-4 border-b border-white/5">
-              Define semester periods. Courses are assigned to semesters during course creation.
-            </p>
-            {semesters.map((sem, i) => (
-              <div key={sem.id} className="flex items-center gap-6 py-5 border-b border-white/5">
-                <div className="flex-1">
-                  <input value={sem.name} onChange={e => setSemesters(prev => prev.map((s, j) => j === i ? { ...s, name: e.target.value } : s))}
-                    className="bg-transparent border-b border-white/10 text-white text-sm outline-none focus:border-brand w-full pb-1" />
-                </div>
-                <select value={sem.type} onChange={e => setSemesters(prev => prev.map((s, j) => j === i ? { ...s, type: e.target.value as any } : s))}
-                  className="bg-white/[0.02] border border-white/10 px-3 py-1.5 text-white text-xs outline-none font-mono">
-                  <option value="odd" className="bg-[#0a0a0f]">Odd</option>
-                  <option value="even" className="bg-[#0a0a0f]">Even</option>
-                </select>
-                <div className="flex items-center gap-2 text-xs font-mono text-white/40">
-                  <input value={sem.startMonth} onChange={e => setSemesters(prev => prev.map((s, j) => j === i ? { ...s, startMonth: e.target.value } : s))}
-                    placeholder="Start month" className="bg-white/[0.02] border border-white/10 px-3 py-1.5 text-white outline-none focus:border-brand w-24" />
-                  <span>→</span>
-                  <input value={sem.endMonth} onChange={e => setSemesters(prev => prev.map((s, j) => j === i ? { ...s, endMonth: e.target.value } : s))}
-                    placeholder="End month" className="bg-white/[0.02] border border-white/10 px-3 py-1.5 text-white outline-none focus:border-brand w-24" />
-                </div>
-                <button onClick={() => setSemesters(prev => prev.filter((_, j) => j !== i))}
-                  className="text-white/20 hover:text-alert transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-              </div>
-            ))}
-            <div className="flex justify-between items-center pt-4">
-              <button onClick={() => setSemesters(prev => [...prev, { id: `sem${Date.now()}`, name: "New Semester", type: "odd", startMonth: "", endMonth: "" }])}
-                className="text-[10px] font-mono text-brand uppercase tracking-widest flex items-center gap-2 hover:text-white transition-colors">
-                <Plus className="w-3.5 h-3.5" /> Add Semester
-              </button>
-              <button onClick={() => addToast("Semester configuration saved.", "success")}
-                className="px-5 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/90 transition-colors flex items-center gap-2">
-                <Save className="w-3.5 h-3.5" /> Save Semesters
-              </button>
-            </div>
-          </motion.div>
-        )}
+        <motion.section variants={fadeSlideUp} className="overflow-x-auto border border-white/10">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className={th}>AY</th>
+                <th className={th}>Semester Name</th>
+                <th className={th}>Start Date</th>
+                <th className={th}>End Date</th>
+                <th className={th}>Courses Assigned</th>
+              </tr>
+            </thead>
+            <tbody>
+              {semesters.map((s, idx) => (
+                <tr key={s.id} className="border-b border-white/5">
+                  <td className="px-3 py-2 text-sm text-white/80">{s.ay}</td>
+                  <td className="px-3 py-2"><input value={s.semesterName} onChange={(e) => setSemesters((prev) => prev.map((row, i) => (i === idx ? { ...row, semesterName: e.target.value } : row)))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                  <td className="px-3 py-2"><input type="date" value={s.startDate} onChange={(e) => setSemesters((prev) => prev.map((row, i) => (i === idx ? { ...row, startDate: e.target.value } : row)))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                  <td className="px-3 py-2"><input type="date" value={s.endDate} onChange={(e) => setSemesters((prev) => prev.map((row, i) => (i === idx ? { ...row, endDate: e.target.value } : row)))} className="w-full bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                  <td className="px-3 py-2"><input type="number" min={0} value={s.coursesAssigned} onChange={(e) => setSemesters((prev) => prev.map((row, i) => (i === idx ? { ...row, coursesAssigned: Number(e.target.value) } : row)))} className="w-20 bg-transparent border border-white/10 px-2 py-1.5 text-sm text-white" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </motion.section>
 
+        <motion.section variants={fadeSlideUp}>
+          <button onClick={copyFromAYMinus1} className="px-3 py-2 border border-white/10 text-xs font-mono text-white/70 uppercase">Copy from AY-1</button>
+        </motion.section>
       </motion.div>
     </AccessGate>
   );

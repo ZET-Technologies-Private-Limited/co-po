@@ -1,491 +1,688 @@
 "use client";
 
-import { useState, useMemo, useRef, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Users, Search, Plus, Edit3, Trash2, Shield,
-  CheckCircle2, X, Loader2, Upload, BookOpen, UserCheck
-} from "lucide-react";
-import { fadeSlideUp, staggerContainer } from "@/lib/animations";
-import { useDataStore, UserRecord, CourseRecord } from "@/lib/dataStore";
-import { useAuthStore, Role } from "@/lib/authStore";
-import { useUIStore } from "@/lib/uiStore";
+import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import { Download, Ellipsis, Plus, Upload } from "lucide-react";
 import { AccessGate } from "@/components/auth/AccessGate";
-import { FormInput } from "@/components/ui/FormInput";
-import { DeleteConfirmationDialog } from "@/components/ui/DeleteConfirmationDialog";
-import { useDeleteConfirmation } from "@/lib/useFormFeatures";
-import { DataTable } from "@/components/ui/DataTable";
+import { fadeSlideUp, staggerContainer } from "@/lib/animations";
+import { useDataStore, UserRecord } from "@/lib/dataStore";
+import { Role, useAuthStore } from "@/lib/authStore";
+import { useUIStore } from "@/lib/uiStore";
 
-const ROLE_OPTIONS: { value: Role; label: string; color: string }[] = [
-  { value: "admin",           label: "Admin",        color: "text-alert" },
-  { value: "department_head", label: "HOD",           color: "text-aurora" },
-  { value: "subject_lead",    label: "Course Lead",   color: "text-insight" },
-  { value: "faculty",         label: "Faculty",       color: "text-brand" },
-  { value: "student",         label: "Student",       color: "text-cyan-400" },
-];
-const DEPTS = ["Administration", "CSE", "ECE", "MECH", "CIVIL", "IT", "MBA"];
+type SortKey = "employeeId" | "name" | "email" | "role" | "dept" | "status" | "lastLogin";
 
 type FormState = {
-  name: string; email: string; password: string; employeeId: string;
-  phone: string; roles: Role[]; dept: string; designation: string;
-  status: "active" | "inactive";
-};
-const BLANK: FormState = {
-  name: "", email: "", password: "", employeeId: "", phone: "",
-  roles: ["faculty"], dept: "CSE", designation: "", status: "active",
+  employeeId: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: Role;
+  dept: string;
+  designation: string;
+  password: string;
+  alsoLead: boolean;
+  sendWelcome: boolean;
 };
 
-type ModalMode = "user" | "assign_course" | "assign_lead" | null;
+type CsvError = { row: number; field: string; error: string };
+
+const ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
+  { value: "faculty", label: "Faculty" },
+  { value: "subject_lead", label: "Course Lead" },
+  { value: "department_head", label: "HOD" },
+  { value: "admin", label: "Admin" },
+  { value: "student", label: "Student" },
+];
+
+const BLANK_FORM: FormState = {
+  employeeId: "",
+  name: "",
+  email: "",
+  phone: "",
+  role: "faculty",
+  dept: "CSE",
+  designation: "",
+  password: "Nexus@123",
+  alsoLead: false,
+  sendWelcome: true,
+};
+
+function primaryRole(user: UserRecord): Role {
+  if (user.roles.includes("admin")) return "admin";
+  if (user.roles.includes("department_head")) return "department_head";
+  if (user.roles.includes("subject_lead")) return "subject_lead";
+  if (user.roles.includes("faculty")) return "faculty";
+  return "student";
+}
+
+function roleLabel(role: Role): string {
+  return ROLE_OPTIONS.find((r) => r.value === role)?.label || role;
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (ch === "," && !quoted) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
 
 export default function AdminUsersPage() {
-  const users        = useDataStore(s => s.users);
-  const courses      = useDataStore(s => s.courses);
-  const addUser      = useDataStore(s => s.addUser);
-  const updateUser   = useDataStore(s => s.updateUser);
-  const deleteUser   = useDataStore(s => s.deleteUser);
-  const updateCourse = useDataStore(s => s.updateCourse);
-  const addAuditEntry = useDataStore(s => s.addAuditEntry);
+  const users = useDataStore((s) => s.users);
+  const courses = useDataStore((s) => s.courses);
+  const addUser = useDataStore((s) => s.addUser);
+  const updateUser = useDataStore((s) => s.updateUser);
+  const addAuditEntry = useDataStore((s) => s.addAuditEntry);
   const { user: me } = useAuthStore();
   const { addToast } = useUIStore();
+  const router = useRouter();
 
-  const [search, setSearch]         = useState("");
-  const [roleFilter, setRoleFilter] = useState("all");
-  const [modal, setModal]           = useState<ModalMode>(null);
-  const [editingId, setEditingId]   = useState<string | null>(null);
-  const [form, setForm]             = useState<FormState>(BLANK);
-  const [saving, setSaving]         = useState(false);
-  const [csvErrors, setCsvErrors]   = useState<string[]>([]);
+  const deptOptions = useMemo(() => {
+    const set = new Set<string>(["Administration", ...courses.map((c) => c.dept), ...users.map((u) => u.dept)]);
+    return [...set];
+  }, [courses, users]);
+
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
+  const [deptFilter, setDeptFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sortKey, setSortKey] = useState<SortKey>("employeeId");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [actionMenuUserId, setActionMenuUserId] = useState<string | null>(null);
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState>(BLANK_FORM);
+  const [employeeIdError, setEmployeeIdError] = useState("");
+
+  const [showImport, setShowImport] = useState(false);
+  const [csvErrors, setCsvErrors] = useState<CsvError[]>([]);
   const [csvPreview, setCsvPreview] = useState<FormState[]>([]);
-  const [assignUserId, setAssignUserId] = useState<string>("");
-  const [assignCourseId, setAssignCourseId] = useState<string>("");
-  const [assignRole, setAssignRole] = useState<"faculty" | "lead">("faculty");
-  const fileRef = useRef<HTMLInputElement>(null);
-  
-  // SF-09: Delete confirmation
-  const { showConfirm, requestDelete, confirmDelete, cancelDelete } = useDeleteConfirmation();
-  const [userToDelete, setUserToDelete] = useState<UserRecord | null>(null);
+  const csvRef = useRef<HTMLInputElement>(null);
 
-  const filtered = useMemo(() =>
-    users.filter(u =>
-      (roleFilter === "all" || u.roles.includes(roleFilter as Role)) &&
-      (u.name.toLowerCase().includes(search.toLowerCase()) ||
-       u.email.toLowerCase().includes(search.toLowerCase()) ||
-       u.employeeId.toLowerCase().includes(search.toLowerCase()))
-    ), [users, search, roleFilter]);
-
-  const openCreate = () => { setForm(BLANK); setEditingId(null); setModal("user"); };
-  const openEdit   = (u: UserRecord) => {
-    setForm({ name: u.name, email: u.email, password: u.password, employeeId: u.employeeId,
-      phone: (u as any).phone || "", roles: u.roles, dept: u.dept, designation: u.designation, status: u.status });
-    setEditingId(u.id); setModal("user");
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.name || !form.email || !form.employeeId) { addToast("Name, Email, and Employee ID are required.", "warning"); return; }
-    setSaving(true);
-    await new Promise(r => setTimeout(r, 500));
-    if (editingId) {
-      const prev = users.find(u => u.id === editingId);
-      updateUser(editingId, form);
-      if (prev && prev.roles[0] !== form.roles[0]) {
-        addAuditEntry({ type: "user", userId: me?.id || "admin", role: "admin",
-          action: `Role changed for ${form.name}: ${prev.roles[0]} → ${form.roles[0]}`, ip: "127.0.0.1" });
-      }
-      addToast(`Updated: ${form.name}`, "success");
-    } else {
-      addUser(form);
-      addToast(`Provisioned: ${form.name} (${form.employeeId})`, "success");
-    }
-    setSaving(false); setModal(null);
-  };
-
-  const handleDelete = (u: UserRecord) => {
-    if (u.id === me?.id) { addToast("Cannot delete your own account.", "warning"); return; }
-    setUserToDelete(u);
-    requestDelete(() => {
-      deleteUser(u.id);
-      addAuditEntry({ type: "user", userId: me?.id || "admin", role: "admin",
-        action: `User deleted: ${u.name} (${u.employeeId})`, ip: "127.0.0.1" });
-      addToast(`Removed: ${u.name}`, "info");
+  const filteredUsers = useMemo(() => {
+    return users.filter((u) => {
+      const role = primaryRole(u);
+      const matchesRole = roleFilter === "all" || role === roleFilter;
+      const matchesDept = deptFilter === "all" || u.dept === deptFilter;
+      const matchesStatus = statusFilter === "all" || u.status === statusFilter;
+      const q = search.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        u.name.toLowerCase().includes(q) ||
+        u.employeeId.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q);
+      return matchesRole && matchesDept && matchesStatus && matchesSearch;
     });
-  };
-  
-  // SF-08: Duplicate check for Employee ID
-  const checkDuplicateEmployeeId = useCallback(async (value: string): Promise<boolean> => {
-    const isDuplicate = users.some(u => 
-      u.employeeId.toLowerCase() === value.toLowerCase() && u.id !== editingId
-    );
-    return isDuplicate;
-  }, [users, editingId]);
-  
-  // SF-08: Duplicate check for Email
-  const checkDuplicateEmail = useCallback(async (value: string): Promise<boolean> => {
-    const isDuplicate = users.some(u => 
-      u.email.toLowerCase() === value.toLowerCase() && u.id !== editingId
-    );
-    return isDuplicate;
-  }, [users, editingId]);
+  }, [users, roleFilter, deptFilter, statusFilter, search]);
 
-  const toggleStatus = (u: UserRecord) => {
-    const next = u.status === "active" ? "inactive" : "active";
-    updateUser(u.id, { status: next });
-    addAuditEntry({ type: "user", userId: me?.id || "admin", role: "admin",
-      action: `User ${next === "active" ? "reactivated" : "deactivated"}: ${u.name}`, ip: "127.0.0.1" });
-    addToast(`${u.name} — ${next}`, "info");
-  };
+  const sortedUsers = useMemo(() => {
+    const list = [...filteredUsers];
+    list.sort((a, b) => {
+      const roleA = roleLabel(primaryRole(a));
+      const roleB = roleLabel(primaryRole(b));
+      const valA =
+        sortKey === "employeeId" ? a.employeeId :
+        sortKey === "name" ? a.name :
+        sortKey === "email" ? a.email :
+        sortKey === "role" ? roleA :
+        sortKey === "dept" ? a.dept :
+        sortKey === "status" ? a.status :
+        a.lastLogin || "";
+      const valB =
+        sortKey === "employeeId" ? b.employeeId :
+        sortKey === "name" ? b.name :
+        sortKey === "email" ? b.email :
+        sortKey === "role" ? roleB :
+        sortKey === "dept" ? b.dept :
+        sortKey === "status" ? b.status :
+        b.lastLogin || "";
 
-  // Bulk CSV import
-  const handleCSV = (file: File) => {
-    setCsvErrors([]); setCsvPreview([]);
-    const reader = new FileReader();
-    reader.onload = e => {
-      const text = e.target?.result as string;
-      const lines = text.trim().split("\n").map(l => l.split(",").map(c => c.trim().replace(/^"|"$/g, "")));
-      if (lines.length < 2) { setCsvErrors(["CSV must have a header row and at least one data row."]); return; }
-      const header = lines[0].map(h => h.toLowerCase());
-      const errs: string[] = [];
-      const preview: FormState[] = [];
-      lines.slice(1).forEach((row, i) => {
-        const get = (key: string) => row[header.indexOf(key)] || "";
-        const name = get("name"); const email = get("email"); const empId = get("employeeid") || get("employee_id") || get("id");
-        const role = (get("role") || "faculty") as Role;
-        if (!name) errs.push(`Row ${i + 2}: Name missing`);
-        if (!email || !email.includes("@")) errs.push(`Row ${i + 2}: Invalid email`);
-        if (!empId) errs.push(`Row ${i + 2}: Employee ID missing`);
-        if (!ROLE_OPTIONS.find(r => r.value === role)) errs.push(`Row ${i + 2}: Invalid role "${role}"`);
-        if (!errs.length || errs.length === 0) {
-          preview.push({ name, email, password: get("password") || "Nexus@123", employeeId: empId,
-            phone: get("phone") || "", roles: [role], dept: get("dept") || get("department") || "CSE",
-            designation: get("designation") || "", status: "active" });
-        }
+      const comp = String(valA).localeCompare(String(valB));
+      return sortDir === "asc" ? comp : -comp;
+    });
+    return list;
+  }, [filteredUsers, sortKey, sortDir]);
+
+  const selectAllChecked = sortedUsers.length > 0 && sortedUsers.every((u) => selected.has(u.id));
+
+  function toggleSort(next: SortKey) {
+    if (sortKey === next) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(next);
+    setSortDir("asc");
+  }
+
+  function openAddForm() {
+    setEditingId(null);
+    setForm(BLANK_FORM);
+    setEmployeeIdError("");
+    setShowForm(true);
+  }
+
+  function openEditForm(user: UserRecord) {
+    setEditingId(user.id);
+    setForm({
+      employeeId: user.employeeId,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || "",
+      role: primaryRole(user),
+      dept: user.dept,
+      designation: user.designation,
+      password: user.password || "Nexus@123",
+      alsoLead: user.roles.includes("faculty") && user.roles.includes("subject_lead"),
+      sendWelcome: false,
+    });
+    setEmployeeIdError("");
+    setShowForm(true);
+  }
+
+  function validateEmployeeIdUniqueness(value: string) {
+    const exists = users.some((u) => u.employeeId.toLowerCase() === value.toLowerCase() && u.id !== editingId);
+    setEmployeeIdError(exists ? "Employee ID must be unique." : "");
+  }
+
+  function submitForm(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.employeeId || !form.name || !form.email) {
+      addToast("Employee ID, Full Name and Email are required.", "warning");
+      return;
+    }
+    validateEmployeeIdUniqueness(form.employeeId);
+    if (users.some((u) => u.employeeId.toLowerCase() === form.employeeId.toLowerCase() && u.id !== editingId)) {
+      return;
+    }
+
+    const roles: Role[] = form.role === "faculty" && form.alsoLead ? ["faculty", "subject_lead"] : [form.role];
+
+    if (editingId) {
+      updateUser(editingId, {
+        employeeId: form.employeeId,
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        roles,
+        dept: form.dept,
+        designation: form.designation,
       });
-      setCsvErrors(errs);
-      if (errs.length === 0) setCsvPreview(preview);
+      addToast("User updated.", "success");
+    } else {
+      addUser({
+        employeeId: form.employeeId,
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        roles,
+        dept: form.dept,
+        designation: form.designation,
+        status: "active",
+        password: form.password,
+      });
+      if (form.sendWelcome) {
+        addAuditEntry({
+          type: "user",
+          userId: me?.id || "admin",
+          role: "admin",
+          action: `Welcome email sent to ${form.email}`,
+          ip: "127.0.0.1",
+        });
+      }
+      addToast("User created.", "success");
+    }
+    setShowForm(false);
+    setEditingId(null);
+    setForm(BLANK_FORM);
+  }
+
+  function toggleUserSelection(userId: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(userId);
+      else next.delete(userId);
+      return next;
+    });
+  }
+
+  function applyBulkDeactivate() {
+    selected.forEach((id) => updateUser(id, { status: "inactive" }));
+    addToast(`${selected.size} user(s) deactivated.`, "info");
+    setSelected(new Set());
+  }
+
+  function applyBulkResetPassword() {
+    selected.forEach((id) => updateUser(id, { password: "Reset@123" }));
+    addToast(`${selected.size} password(s) reset.`, "info");
+    setSelected(new Set());
+  }
+
+  async function exportUsersToExcel(data: UserRecord[]) {
+    const XLSX = await import("xlsx");
+    const rows = data.map((u) => ({
+      "Employee ID": u.employeeId,
+      "Full Name": u.name,
+      Email: u.email,
+      Role: roleLabel(primaryRole(u)),
+      Department: u.dept,
+      Status: u.status,
+      "Last Login": u.lastLogin || "",
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Users");
+    XLSX.writeFile(wb, "users_filtered_export.xlsx");
+  }
+
+  function downloadTemplate() {
+    const template = [
+      "Employee ID,Full Name,Email,Phone,Role,Department,Designation,Password",
+      "FAC109,Anita Reddy,anita@example.com,9876543210,faculty,CSE,Assistant Professor,Nexus@123",
+    ].join("\n");
+    const blob = new Blob([template], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "user_import_template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function parseCsv(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = String(reader.result || "");
+      const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length < 2) {
+        setCsvErrors([{ row: 1, field: "file", error: "CSV must contain header and at least one data row." }]);
+        setCsvPreview([]);
+        return;
+      }
+
+      const headers = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+      const errors: CsvError[] = [];
+      const preview: FormState[] = [];
+      const seenIds = new Set<string>();
+
+      function getCell(row: string[], key: string, aliases: string[] = []) {
+        const keys = [key, ...aliases].map((k) => k.toLowerCase());
+        for (const k of keys) {
+          const idx = headers.indexOf(k);
+          if (idx >= 0) return (row[idx] || "").trim();
+        }
+        return "";
+      }
+
+      for (let i = 1; i < lines.length; i += 1) {
+        const row = parseCsvLine(lines[i]);
+        const rowNo = i + 1;
+        const employeeId = getCell(row, "employee id", ["employee_id", "id", "employeeid"]);
+        const name = getCell(row, "full name", ["name"]);
+        const email = getCell(row, "email");
+        const phone = getCell(row, "phone");
+        const roleRaw = getCell(row, "role").toLowerCase();
+        const dept = getCell(row, "department", ["dept"]) || "CSE";
+        const designation = getCell(row, "designation");
+        const password = getCell(row, "password") || "Nexus@123";
+
+        if (!employeeId) errors.push({ row: rowNo, field: "Employee ID", error: "Missing Employee ID" });
+        if (!name) errors.push({ row: rowNo, field: "Full Name", error: "Missing Full Name" });
+        if (!email || !email.includes("@")) errors.push({ row: rowNo, field: "Email", error: "Invalid Email" });
+
+        const normalizedRole = roleRaw === "course lead" ? "subject_lead" : roleRaw;
+        const validRole = ROLE_OPTIONS.some((r) => r.value === normalizedRole);
+        if (!validRole) errors.push({ row: rowNo, field: "Role", error: `Invalid Role: ${roleRaw || "(blank)"}` });
+
+        if (employeeId) {
+          if (seenIds.has(employeeId.toLowerCase())) {
+            errors.push({ row: rowNo, field: "Employee ID", error: "Duplicate Employee ID in CSV" });
+          }
+          seenIds.add(employeeId.toLowerCase());
+        }
+
+        if (users.some((u) => u.employeeId.toLowerCase() === employeeId.toLowerCase())) {
+          errors.push({ row: rowNo, field: "Employee ID", error: "Already exists in system" });
+        }
+
+        if (!errors.some((e) => e.row === rowNo)) {
+          preview.push({
+            employeeId,
+            name,
+            email,
+            phone,
+            role: normalizedRole as Role,
+            dept,
+            designation,
+            password,
+            alsoLead: false,
+            sendWelcome: false,
+          });
+        }
+      }
+
+      setCsvErrors(errors);
+      setCsvPreview(preview);
     };
     reader.readAsText(file);
-  };
+  }
 
-  const importCSV = async () => {
-    setSaving(true);
-    for (const u of csvPreview) { addUser(u); await new Promise(r => setTimeout(r, 50)); }
-    addAuditEntry({ type: "user", userId: me?.id || "admin", role: "admin",
-      action: `Bulk import: ${csvPreview.length} users provisioned via CSV`, ip: "127.0.0.1" });
-    addToast(`${csvPreview.length} users imported successfully.`, "success");
-    setCsvPreview([]); setSaving(false);
-  };
+  function confirmCsvImport() {
+    if (csvErrors.length > 0) return;
+    csvPreview.forEach((item) => {
+      addUser({
+        employeeId: item.employeeId,
+        name: item.name,
+        email: item.email,
+        phone: item.phone,
+        roles: [item.role],
+        dept: item.dept,
+        designation: item.designation,
+        status: "active",
+        password: item.password,
+      });
+    });
+    addToast(`${csvPreview.length} users imported.`, "success");
+    setCsvPreview([]);
+    setCsvErrors([]);
+  }
 
-  // Course assignment
-  const handleAssignCourse = () => {
-    if (!assignUserId || !assignCourseId) { addToast("Select both user and course.", "warning"); return; }
-    if (assignRole === "faculty") {
-      updateCourse(assignCourseId, { facultyId: assignUserId });
-      addToast("Faculty assigned to course.", "success");
-    } else {
-      updateCourse(assignCourseId, { leadId: assignUserId });
-      addToast("Course Lead assigned.", "success");
-    }
-    addAuditEntry({ type: "user", userId: me?.id || "admin", role: "admin",
-      action: `${assignRole === "faculty" ? "Faculty" : "Lead"} assigned: user ${assignUserId} → course ${assignCourseId}`, ip: "127.0.0.1" });
-    setModal(null);
-  };
-
-  const ROLE_META = Object.fromEntries(ROLE_OPTIONS.map(r => [r.value, r]));
+  const thClass = "px-3 py-3 text-left text-[10px] font-mono text-white/30 uppercase tracking-widest cursor-pointer";
 
   return (
     <AccessGate feature="user_management" deny="lock">
-      <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-7xl mx-auto pb-32">
+      <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="max-w-7xl mx-auto pb-32 space-y-6">
+        <motion.header variants={fadeSlideUp} className="border-b border-white/5 pb-5">
+          <h1 className="text-3xl font-display text-white">User Management</h1>
+          <p className="text-xs font-mono text-white/30 mt-2">
+            User List Page and workflows for add/edit, import, bulk actions, and assignment sub-pages.
+          </p>
+        </motion.header>
 
-        {/* Header */}
-        <motion.div variants={fadeSlideUp} className="flex justify-between items-end pb-8 border-b border-white/5">
-          <div>
-            <div className="flex items-center gap-2 text-[10px] font-mono text-brand uppercase tracking-widest mb-3">
-              <span className="w-8 h-[1px] bg-brand" /> User Administration
-            </div>
-            <h1 className="text-4xl font-display text-white flex items-center gap-4">
-              <Users className="w-8 h-8 text-brand" /> User Management
-            </h1>
-            <p className="text-white/40 font-light mt-1">
-              {users.length} registered · {users.filter(u => u.status === "active").length} active
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <label className="px-5 py-2.5 border border-white/10 text-white/40 text-[10px] font-mono uppercase tracking-widest hover:border-white/30 hover:text-white transition-colors flex items-center gap-2 cursor-pointer">
-              <Upload className="w-3.5 h-3.5" /> Bulk Import CSV
-              <input ref={fileRef} type="file" accept=".csv" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleCSV(f); }} />
-            </label>
-            <button onClick={() => setModal("assign_course")}
-              className="px-5 py-2.5 border border-white/10 text-white/40 text-[10px] font-mono uppercase tracking-widest hover:border-white/30 hover:text-white transition-colors flex items-center gap-2">
-              <BookOpen className="w-3.5 h-3.5" /> Assign Course
-            </button>
-            <button onClick={openCreate}
-              className="px-5 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/90 transition-colors flex items-center gap-2">
-              <Plus className="w-3.5 h-3.5" /> Provision User
-            </button>
-          </div>
-        </motion.div>
-
-        {/* CSV preview */}
-        {csvPreview.length > 0 && (
-          <motion.div variants={fadeSlideUp} className="border border-attain/20 bg-attain/5 p-5 flex items-center justify-between">
-            <p className="text-sm text-attain font-mono">{csvPreview.length} users ready to import from CSV.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setCsvPreview([])} className="text-[10px] font-mono text-white/40 uppercase hover:text-white transition-colors">Discard</button>
-              <button onClick={importCSV} disabled={saving}
-                className="px-5 py-2 bg-attain text-white text-[10px] font-mono uppercase tracking-widest flex items-center gap-2 disabled:opacity-50">
-                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Confirm Import
-              </button>
-            </div>
-          </motion.div>
-        )}
-        {csvErrors.length > 0 && (
-          <div className="border border-alert/20 bg-alert/5 p-4 flex flex-col gap-1">
-            {csvErrors.map((e, i) => <p key={i} className="text-xs text-alert font-mono">{e}</p>)}
-          </div>
-        )}
-
-        {/* Table Refactored with DataTable */}
-        <motion.div variants={fadeSlideUp} className="py-6">
-          <DataTable 
-            data={filtered}
-            pageSize={10}
-            columns={[
-              { id: "employeeId", header: "Employee ID", accessor: u => u.employeeId, sortable: true, width: 150 },
-              { id: "name", header: "Name", accessor: u => u.name, sortable: true, width: 250 },
-              { id: "email", header: "Email", accessor: u => u.email, sortable: true, width: 250 },
-              { id: "dept", header: "Department", accessor: u => u.dept, sortable: true, width: 150 },
-              { 
-                id: "roles", 
-                header: "Role(s)", 
-                accessor: u => u.roles.join(", "),
-                render: (_, u) => (
-                  <div className="flex flex-wrap gap-1">
-                    {u.roles.map(r => {
-                      const m = ROLE_META[r];
-                      return <span key={r} className={`px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-widest border ${m?.color || ""} border-current/20 bg-current/5`}>{m?.label || r}</span>;
-                    })}
-                  </div>
-                )
-              },
-              { 
-                id: "status", 
-                header: "Status", 
-                accessor: u => u.status,
-                sortable: true,
-                width: 100,
-                render: (val) => (
-                  <span className={`text-[9px] font-mono uppercase ${val === "active" ? "text-attain" : "text-white/20"}`}>{val}</span>
-                )
-              },
-              {
-                id: "actions",
-                header: "Actions",
-                accessor: u => u.id,
-                width: 120,
-                render: (_, u) => (
-                  <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => openEdit(u)} title="Edit"
-                      className="p-1.5 text-white/30 hover:text-white transition-colors"><Edit3 className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => toggleStatus(u)} title="Toggle status"
-                      className="p-1.5 text-white/30 hover:text-white transition-colors"><Shield className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => handleDelete(u)} title="Delete"
-                      className="p-1.5 text-white/30 hover:text-alert transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                  </div>
-                )
-              }
-            ]}
+        <motion.section variants={fadeSlideUp} className="flex flex-wrap gap-2 items-center">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or employee ID"
+            className="bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white min-w-[250px]"
           />
-        </motion.div>
+          <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as "all" | Role)} className="bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white">
+            <option value="all">All Roles</option>
+            {ROLE_OPTIONS.map((r) => (
+              <option key={r.value} value={r.value} className="bg-[#0a0a0f]">{r.label}</option>
+            ))}
+          </select>
+          <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white">
+            <option value="all">All Departments</option>
+            {deptOptions.map((d) => (
+              <option key={d} value={d} className="bg-[#0a0a0f]">{d}</option>
+            ))}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "inactive")} className="bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white">
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <button onClick={() => exportUsersToExcel(sortedUsers)} className="px-3 py-2 border border-white/10 text-xs font-mono text-white/60 hover:text-white uppercase flex items-center gap-1">
+            <Download className="w-3.5 h-3.5" /> Export Users
+          </button>
+          <button onClick={openAddForm} className="px-3 py-2 bg-brand text-white text-xs font-mono uppercase flex items-center gap-1">
+            <Plus className="w-3.5 h-3.5" /> Add User
+          </button>
+          <button onClick={() => setShowImport((v) => !v)} className="px-3 py-2 border border-white/10 text-xs font-mono text-white/60 hover:text-white uppercase flex items-center gap-1">
+            <Upload className="w-3.5 h-3.5" /> Bulk Import
+          </button>
+          <Link href="/admin/users/course-assignment" className="px-3 py-2 border border-white/10 text-xs font-mono text-white/60 hover:text-white uppercase">
+            Course Assignment
+          </Link>
+          <Link href="/admin/users/student-bulk-enrolment" className="px-3 py-2 border border-white/10 text-xs font-mono text-white/60 hover:text-white uppercase">
+            Student Enrolment
+          </Link>
+        </motion.section>
 
-        {/* Create/Edit modal */}
-        <AnimatePresence>
-          {modal === "user" && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8">
-              <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }}
-                className="w-full max-w-lg bg-[#0a0a0f] border border-white/10 p-8 max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-xl font-display text-white">{editingId ? "Edit User" : "Provision New User"}</h3>
-                  <button onClick={() => setModal(null)} className="text-white/30 hover:text-white transition-colors"><X className="w-5 h-5" /></button>
-                </div>
-                <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                  <FormInput
-                    label="Full Name"
-                    value={form.name}
-                    onChange={(value) => setForm(p => ({ ...p, name: value }))}
-                    placeholder="Dr. Firstname Lastname"
-                    required
-                    autoTrim
-                  />
-                  <FormInput
-                    label="Email"
-                    type="email"
-                    value={form.email}
-                    onChange={(value) => setForm(p => ({ ...p, email: value }))}
-                    placeholder="user@nexus.edu"
-                    required
-                    autoTrim
-                    duplicateCheckFn={checkDuplicateEmail}
-                  />
-                  <FormInput
-                    label="Employee / Roll ID"
-                    value={form.employeeId}
-                    onChange={(value) => setForm(p => ({ ...p, employeeId: value }))}
-                    placeholder="FAC2024001"
-                    required
-                    autoTrim
-                    autoUppercase
-                    duplicateCheckFn={checkDuplicateEmployeeId}
-                  />
-                  <FormInput
-                    label="Phone"
-                    type="text"
-                    value={form.phone}
-                    onChange={(value) => setForm(p => ({ ...p, phone: value }))}
-                    placeholder="+91 9876543210"
-                    autoTrim
-                  />
-                  <FormInput
-                    label="Password"
-                    type="password"
-                    value={form.password}
-                    onChange={(value) => setForm(p => ({ ...p, password: value }))}
-                    placeholder="Secure@Pass1"
-                    required={!editingId}
-                  />
-                  <FormInput
-                    label="Designation"
-                    value={form.designation}
-                    onChange={(value) => setForm(p => ({ ...p, designation: value }))}
-                    placeholder="Assistant Professor"
-                    autoTrim
-                  />
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-mono text-white/30 uppercase tracking-widest">Department</label>
-                    <select value={form.dept} onChange={e => setForm(p => ({ ...p, dept: e.target.value }))}
-                      className="bg-white/[0.02] border border-white/10 px-4 py-2.5 text-white text-sm outline-none">
-                      {DEPTS.map(d => <option key={d} value={d} className="bg-[#0a0a0f]">{d}</option>)}
-                    </select>
-                  </div>
-                  {/* Dual-role: allow multiple roles */}
-                  <div className="flex flex-col gap-2">
-                    <label className="text-[9px] font-mono text-white/30 uppercase tracking-widest">Role(s) — select multiple for dual-role</label>
-                    <div className="flex flex-wrap gap-2">
-                      {ROLE_OPTIONS.map(r => {
-                        const active = form.roles.includes(r.value);
-                        return (
-                          <button key={r.value} type="button"
-                            onClick={() => setForm(p => ({
-                              ...p,
-                              roles: active ? p.roles.filter(x => x !== r.value) : [...p.roles, r.value]
-                            }))}
-                            className={`px-3 py-1.5 text-[9px] font-mono uppercase tracking-widest border transition-colors ${active ? `${r.color} border-current/30 bg-current/10` : "border-white/10 text-white/30 hover:border-white/30"}`}>
-                            {r.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="flex gap-3 pt-2 border-t border-white/5">
-                    <button type="button" onClick={() => setModal(null)}
-                      className="flex-1 py-2.5 border border-white/10 text-white/40 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">
-                      Cancel
-                    </button>
-                    <button type="submit" disabled={saving}
-                      className="flex-1 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-brand/90 transition-colors">
-                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                      {editingId ? "Save Changes" : "Create User"}
-                    </button>
-                  </div>
-                </form>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {selected.size > 0 && (
+          <motion.section variants={fadeSlideUp} className="border border-brand/30 bg-brand/10 px-3 py-2 text-xs font-mono text-white flex items-center gap-3">
+            <span>{selected.size} selected:</span>
+            <button onClick={applyBulkDeactivate} className="text-alert hover:text-white uppercase">Deactivate</button>
+            <button onClick={applyBulkResetPassword} className="text-amber-300 hover:text-white uppercase">Reset Password</button>
+            <button onClick={() => exportUsersToExcel(users.filter((u) => selected.has(u.id)))} className="text-attain hover:text-white uppercase">Export</button>
+          </motion.section>
+        )}
 
-        {/* Assign course/lead modal */}
-        <AnimatePresence>
-          {modal === "assign_course" && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8">
-              <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }}
-                className="w-full max-w-md bg-[#0a0a0f] border border-white/10 p-8">
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-xl font-display text-white flex items-center gap-3">
-                    <BookOpen className="w-5 h-5 text-brand" /> Assign Course
-                  </h3>
-                  <button onClick={() => setModal(null)} className="text-white/30 hover:text-white"><X className="w-5 h-5" /></button>
-                </div>
-                <div className="flex flex-col gap-5">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-mono text-white/30 uppercase tracking-widest">Assignment Type</label>
-                    <div className="flex border border-white/10">
-                      {(["faculty", "lead"] as const).map(r => (
-                        <button key={r} onClick={() => setAssignRole(r)}
-                          className={`flex-1 py-2.5 text-[10px] font-mono uppercase tracking-widest transition-colors ${assignRole === r ? "bg-brand text-white" : "text-white/30 hover:text-white"}`}>
-                          {r === "faculty" ? "Faculty" : "Course Lead"}
+        <motion.section variants={fadeSlideUp} className="overflow-x-auto border border-white/10">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className="px-3 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={selectAllChecked}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelected(new Set(sortedUsers.map((u) => u.id)));
+                      } else {
+                        setSelected(new Set());
+                      }
+                    }}
+                  />
+                </th>
+                <th className={thClass} onClick={() => toggleSort("employeeId")}>Employee ID</th>
+                <th className={thClass} onClick={() => toggleSort("name")}>Full Name</th>
+                <th className={thClass} onClick={() => toggleSort("email")}>Email</th>
+                <th className={thClass} onClick={() => toggleSort("role")}>Role</th>
+                <th className={thClass} onClick={() => toggleSort("dept")}>Dept</th>
+                <th className={thClass} onClick={() => toggleSort("status")}>Status</th>
+                <th className={thClass} onClick={() => toggleSort("lastLogin")}>Last Login</th>
+                <th className="px-3 py-3 text-left text-[10px] font-mono text-white/30 uppercase tracking-widest">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-3 py-10 text-center text-sm text-white/30">No users found.</td>
+                </tr>
+              ) : (
+                sortedUsers.map((u) => {
+                  const role = primaryRole(u);
+                  return (
+                    <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                      <td className="px-3 py-3">
+                        <input type="checkbox" checked={selected.has(u.id)} onChange={(e) => toggleUserSelection(u.id, e.target.checked)} />
+                      </td>
+                      <td className="px-3 py-3 text-xs font-mono text-white">{u.employeeId}</td>
+                      <td className="px-3 py-3 text-sm text-white">{u.name}</td>
+                      <td className="px-3 py-3 text-sm text-white/70">{u.email}</td>
+                      <td className="px-3 py-3 text-sm text-white/70">{roleLabel(role)}</td>
+                      <td className="px-3 py-3 text-sm text-white/70">{u.dept}</td>
+                      <td className="px-3 py-3 text-sm">
+                        <span className={u.status === "active" ? "text-attain" : "text-alert"}>{u.status}</span>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-white/50">{u.lastLogin || "Never"}</td>
+                      <td className="px-3 py-3 text-sm text-white/60 relative">
+                        <button onClick={() => setActionMenuUserId((id) => (id === u.id ? null : u.id))} className="p-1 border border-white/10 hover:border-white/40">
+                          <Ellipsis className="w-4 h-4" />
                         </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-mono text-white/30 uppercase tracking-widest">
-                      {assignRole === "faculty" ? "Select Faculty" : "Select Lead"}
-                    </label>
-                    <select value={assignUserId} onChange={e => setAssignUserId(e.target.value)}
-                      className="bg-white/[0.02] border border-white/10 px-4 py-2.5 text-white text-sm outline-none">
-                      <option value="" className="bg-[#0a0a0f]">— Select user —</option>
-                      {users.filter(u => u.roles.includes(assignRole === "faculty" ? "faculty" : "subject_lead") && u.status === "active")
-                        .map(u => <option key={u.id} value={u.id} className="bg-[#0a0a0f]">{u.name} ({u.employeeId})</option>)}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-mono text-white/30 uppercase tracking-widest">Select Course</label>
-                    <select value={assignCourseId} onChange={e => setAssignCourseId(e.target.value)}
-                      className="bg-white/[0.02] border border-white/10 px-4 py-2.5 text-white text-sm outline-none">
-                      <option value="" className="bg-[#0a0a0f]">— Select course —</option>
-                      {courses.map(c => <option key={c.id} value={c.id} className="bg-[#0a0a0f]">{c.code} — {c.name}</option>)}
-                    </select>
-                  </div>
-                  {assignCourseId && (
-                    <div className="text-[10px] font-mono text-white/30 border border-white/5 p-3">
-                      {(() => {
-                        const c = courses.find(x => x.id === assignCourseId);
-                        const fac = users.find(u => u.id === c?.facultyId);
-                        const lead = users.find(u => u.id === c?.leadId);
-                        return <><p>Current Faculty: {fac?.name || "—"}</p><p>Current Lead: {lead?.name || "—"}</p></>;
-                      })()}
-                    </div>
-                  )}
-                  <div className="flex gap-3 pt-2 border-t border-white/5">
-                    <button onClick={() => setModal(null)}
-                      className="flex-1 py-2.5 border border-white/10 text-white/40 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">
-                      Cancel
-                    </button>
-                    <button onClick={handleAssignCourse}
-                      className="flex-1 py-2.5 bg-brand text-white text-[10px] font-mono uppercase tracking-widest hover:bg-brand/90 transition-colors flex items-center justify-center gap-2">
-                      <UserCheck className="w-3.5 h-3.5" /> Assign
-                    </button>
-                  </div>
+                        {actionMenuUserId === u.id && (
+                          <div className="absolute right-3 top-10 z-10 border border-white/10 bg-[#0a0a0f] min-w-[170px]">
+                            <button onClick={() => { openEditForm(u); setActionMenuUserId(null); }} className="block w-full text-left px-3 py-2 text-xs hover:bg-white/[0.04]">Edit</button>
+                            <button onClick={() => { updateUser(u.id, { status: "inactive" }); setActionMenuUserId(null); }} className="block w-full text-left px-3 py-2 text-xs hover:bg-white/[0.04]">Deactivate</button>
+                            <button onClick={() => { updateUser(u.id, { password: "Reset@123" }); setActionMenuUserId(null); }} className="block w-full text-left px-3 py-2 text-xs hover:bg-white/[0.04]">Reset Password</button>
+                            <button onClick={() => { addToast(`Activity view for ${u.name} opened in audit trail.`, "info"); router.push("/admin/audit-log"); }} className="block w-full text-left px-3 py-2 text-xs hover:bg-white/[0.04]">View Activity</button>
+                            <button onClick={() => { router.push(`/admin/users/course-assignment?userId=${u.id}`); }} className="block w-full text-left px-3 py-2 text-xs hover:bg-white/[0.04]">Assign Courses</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </motion.section>
+
+        {showForm && (
+          <motion.section variants={fadeSlideUp} className="border border-white/10 p-4">
+            <h2 className="text-sm font-mono text-white uppercase tracking-widest mb-4">{editingId ? "Edit User" : "Add User"}</h2>
+            <form onSubmit={submitForm} className="space-y-4">
+              <div className="grid md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Employee ID</label>
+                  <input
+                    value={form.employeeId}
+                    onBlur={(e) => validateEmployeeIdUniqueness(e.target.value)}
+                    onChange={(e) => setForm((p) => ({ ...p, employeeId: e.target.value.trim().toUpperCase() }))}
+                    className="w-full bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white"
+                    required
+                  />
+                  {employeeIdError && <p className="text-xs text-alert mt-1">{employeeIdError}</p>}
                 </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Full Name</label>
+                  <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} className="w-full bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white" required />
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Email</label>
+                  <input type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} className="w-full bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white" required />
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Phone</label>
+                  <input value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} className="w-full bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Department</label>
+                  <select value={form.dept} onChange={(e) => setForm((p) => ({ ...p, dept: e.target.value }))} className="w-full bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white">
+                    {deptOptions.map((d) => (
+                      <option key={d} value={d} className="bg-[#0a0a0f]">{d}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-white/40 uppercase">Designation</label>
+                  <input value={form.designation} onChange={(e) => setForm((p) => ({ ...p, designation: e.target.value }))} className="w-full bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white" />
+                </div>
+              </div>
 
-        {/* SF-09: Delete Confirmation Dialog */}
-        <DeleteConfirmationDialog
-          isOpen={showConfirm}
-          onConfirm={confirmDelete}
-          onCancel={cancelDelete}
-          title="Delete User"
-          message={userToDelete ? `Are you sure you want to delete ${userToDelete.name}? This action cannot be undone.` : "Are you sure? This cannot be undone."}
-          confirmText="Delete"
-          cancelText="Cancel"
-          isDangerous
-        />
+              <div>
+                <p className="text-[10px] font-mono text-white/40 uppercase mb-2">Role</p>
+                <div className="flex flex-wrap gap-2">
+                  {ROLE_OPTIONS.map((r) => (
+                    <label key={r.value} className="text-xs text-white/70 flex items-center gap-1 border border-white/10 px-2 py-1">
+                      <input type="radio" name="role" checked={form.role === r.value} onChange={() => setForm((p) => ({ ...p, role: r.value, alsoLead: r.value === "faculty" ? p.alsoLead : false }))} />
+                      {r.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
 
+              {form.role === "faculty" && (
+                <label className="text-xs text-white/70 flex items-center gap-2">
+                  <input type="checkbox" checked={form.alsoLead} onChange={(e) => setForm((p) => ({ ...p, alsoLead: e.target.checked }))} />
+                  Also assign as Lead
+                </label>
+              )}
+
+              {!editingId && (
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-mono text-white/40 uppercase">Initial Password</label>
+                    <input value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} className="w-full bg-white/[0.02] border border-white/10 px-3 py-2 text-sm text-white" />
+                  </div>
+                  <label className="text-xs text-white/70 flex items-center gap-2 mt-6">
+                    <input type="checkbox" checked={form.sendWelcome} onChange={(e) => setForm((p) => ({ ...p, sendWelcome: e.target.checked }))} />
+                    Send welcome email
+                  </label>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button type="submit" className="px-4 py-2 bg-brand text-white text-xs font-mono uppercase">Save</button>
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm(BLANK_FORM); }} className="px-4 py-2 border border-white/10 text-white/70 text-xs font-mono uppercase">Cancel</button>
+              </div>
+            </form>
+          </motion.section>
+        )}
+
+        {showImport && (
+          <motion.section variants={fadeSlideUp} className="border border-white/10 p-4 space-y-4">
+            <h2 className="text-sm font-mono text-white uppercase tracking-widest">Bulk CSV Import</h2>
+            <button onClick={downloadTemplate} className="text-xs font-mono text-brand hover:text-white uppercase">Download user import template</button>
+            <div>
+              <input ref={csvRef} type="file" accept=".csv" onChange={(e) => { const f = e.target.files?.[0]; if (f) parseCsv(f); }} className="text-sm text-white" />
+            </div>
+
+            {csvErrors.length > 0 && (
+              <div className="overflow-x-auto border border-alert/30">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/10">
+                      <th className="px-3 py-2 text-left text-[10px] font-mono uppercase text-white/40">Row</th>
+                      <th className="px-3 py-2 text-left text-[10px] font-mono uppercase text-white/40">Field</th>
+                      <th className="px-3 py-2 text-left text-[10px] font-mono uppercase text-white/40">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvErrors.map((err, idx) => (
+                      <tr key={`${err.row}-${idx}`} className="border-b border-white/5">
+                        <td className="px-3 py-2 text-xs text-white/70">{err.row}</td>
+                        <td className="px-3 py-2 text-xs text-white/70">{err.field}</td>
+                        <td className="px-3 py-2 text-xs text-alert">{err.error}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {csvPreview.length > 0 && (
+              <div className="overflow-x-auto border border-white/10">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/10">
+                      {"Employee ID,Full Name,Email,Role,Department".split(",").map((h) => (
+                        <th key={h} className="px-3 py-2 text-left text-[10px] font-mono uppercase text-white/40">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvPreview.slice(0, 10).map((u) => (
+                      <tr key={`${u.employeeId}-${u.email}`} className="border-b border-white/5">
+                        <td className="px-3 py-2 text-xs text-white/70">{u.employeeId}</td>
+                        <td className="px-3 py-2 text-xs text-white/70">{u.name}</td>
+                        <td className="px-3 py-2 text-xs text-white/70">{u.email}</td>
+                        <td className="px-3 py-2 text-xs text-white/70">{roleLabel(u.role)}</td>
+                        <td className="px-3 py-2 text-xs text-white/70">{u.dept}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <button
+              onClick={confirmCsvImport}
+              disabled={csvErrors.length > 0 || csvPreview.length === 0}
+              className="px-4 py-2 bg-attain text-white text-xs font-mono uppercase disabled:opacity-40"
+            >
+              Confirm Import
+            </button>
+          </motion.section>
+        )}
       </motion.div>
     </AccessGate>
   );
